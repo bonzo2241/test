@@ -5,13 +5,14 @@
     <h2>Тест</h2>
     <form method="post">
       {% for item in questions %}
+        {% set q_index = loop.index0 %}
         <fieldset>
           <legend>{{ loop.index }}. {{ item.question }}</legend>
           {% for option in item.options %}
             <label class="option">
               <input
                 type="radio"
-                name="question-{{ loop.parent.index0 }}"
+                name="question-{{ q_index }}"
                 value="{{ option }}"
                 required
               />
