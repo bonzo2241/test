@@ -1,0 +1,29 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <section class="card">
+    <h2>Результаты тестов</h2>
+    {% if results %}
+      <table>
+        <thead>
+          <tr>
+            <th>Пользователь</th>
+            <th>Результат</th>
+            <th>Дата</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in results %}
+            <tr>
+              <td>{{ row.username }}</td>
+              <td>{{ row.score }} / {{ row.total }}</td>
+              <td>{{ row.created_at }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Результатов пока нет.</p>
+    {% endif %}
+  </section>
+{% endblock %}

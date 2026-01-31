@@ -1,0 +1,26 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <section class="card">
+    <h2>Тест</h2>
+    <form method="post">
+      {% for item in questions %}
+        <fieldset>
+          <legend>{{ loop.index }}. {{ item.question }}</legend>
+          {% for option in item.options %}
+            <label class="option">
+              <input
+                type="radio"
+                name="question-{{ loop.parent.index0 }}"
+                value="{{ option }}"
+                required
+              />
+              {{ option }}
+            </label>
+          {% endfor %}
+        </fieldset>
+      {% endfor %}
+      <button type="submit">Отправить</button>
+    </form>
+  </section>
+{% endblock %}
