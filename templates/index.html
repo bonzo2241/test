@@ -1,0 +1,16 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <section class="card">
+    <h2>Добро пожаловать!</h2>
+    <p>Этот сайт позволяет входить под разными пользователями и проходить короткий тест.</p>
+    {% if user %}
+      <p>Вы уже вошли. Можно приступать к тесту.</p>
+      <a class="button" href="{{ url_for('quiz') }}">Перейти к тесту</a>
+    {% else %}
+      <p>Зарегистрируйтесь или войдите, чтобы начать.</p>
+      <a class="button" href="{{ url_for('register') }}">Регистрация</a>
+      <a class="button secondary" href="{{ url_for('login') }}">Войти</a>
+    {% endif %}
+  </section>
+{% endblock %}
