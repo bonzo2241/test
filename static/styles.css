@@ -99,6 +99,32 @@ fieldset {
   font-weight: 400;
 }
 
+.option.correct {
+  background: #e7f6ec;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.option.wrong {
+  background: #fdecea;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.badge {
+  margin-left: auto;
+  background: #1f4b99;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  align-self: center;
+}
+
+.quiz-review {
+  pointer-events: none;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

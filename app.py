@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -58,11 +59,20 @@ def init_db() -> None:
                 user_id INTEGER NOT NULL,
                 score INTEGER NOT NULL,
                 total INTEGER NOT NULL,
+                answers TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
             """
         )
+        columns = {
+            column["name"]
+            for column in connection.execute("PRAGMA table_info(results)").fetchall()
+        }
+        if "answers" not in columns:
+            connection.execute(
+                "ALTER TABLE results ADD COLUMN answers TEXT NOT NULL DEFAULT '{}'"
+            )
         connection.commit()
 
     ensure_admin_user()
@@ -89,6 +99,11 @@ def current_user() -> sqlite3.Row | None:
         return connection.execute(
             "SELECT id, username, is_admin FROM users WHERE id = ?", (user_id,)
         ).fetchone()
+
+
+@app.context_processor
+def inject_user() -> dict[str, sqlite3.Row | None]:
+    return {"user": current_user()}
 
 
 @app.route("/")
@@ -155,16 +170,25 @@ def quiz():
     if request.method == "POST":
         answers = request.form
         score = 0
+        stored_answers = {}
         for index, item in enumerate(QUESTIONS):
-            if answers.get(f"question-{index}") == item["answer"]:
+            answer_value = answers.get(f"question-{index}")
+            stored_answers[str(index)] = answer_value
+            if answer_value == item["answer"]:
                 score += 1
         with get_db_connection() as connection:
             connection.execute(
                 """
-                INSERT INTO results (user_id, score, total, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO results (user_id, score, total, answers, created_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (user["id"], score, len(QUESTIONS), datetime.utcnow().isoformat()),
+                (
+                    user["id"],
+                    score,
+                    len(QUESTIONS),
+                    json.dumps(stored_answers, ensure_ascii=False),
+                    datetime.utcnow().isoformat(),
+                ),
             )
             connection.commit()
         return render_template(
@@ -186,15 +210,91 @@ def admin_results():
         flash("Недостаточно прав для просмотра результатов.")
         return redirect(url_for("index"))
     with get_db_connection() as connection:
-        results = connection.execute(
+        users = connection.execute(
             """
-            SELECT results.score, results.total, results.created_at, users.username
-            FROM results
-            JOIN users ON users.id = results.user_id
-            ORDER BY results.created_at DESC
+            SELECT users.id, users.username,
+                   COUNT(results.id) AS attempts,
+                   MAX(results.created_at) AS last_attempt
+            FROM users
+            LEFT JOIN results ON results.user_id = users.id
+            GROUP BY users.id
+            ORDER BY users.username
             """
         ).fetchall()
-    return render_template("admin_results.html", results=results)
+    return render_template("admin_results.html", users=users)
+
+
+@app.route("/admin/results/users/<int:user_id>")
+def admin_user_results(user_id: int):
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+    if not user["is_admin"]:
+        flash("Недостаточно прав для просмотра результатов.")
+        return redirect(url_for("index"))
+    with get_db_connection() as connection:
+        user_row = connection.execute(
+            "SELECT id, username FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if user_row is None:
+            flash("Пользователь не найден.")
+            return redirect(url_for("admin_results"))
+        attempts = connection.execute(
+            """
+            SELECT id, score, total, created_at
+            FROM results
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            """,
+            (user_id,),
+        ).fetchall()
+    return render_template(
+        "admin_user_results.html",
+        selected_user=user_row,
+        attempts=attempts,
+    )
+
+
+@app.route("/admin/results/users/<int:user_id>/attempts/<int:result_id>")
+def admin_attempt_detail(user_id: int, result_id: int):
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+    if not user["is_admin"]:
+        flash("Недостаточно прав для просмотра результатов.")
+        return redirect(url_for("index"))
+    with get_db_connection() as connection:
+        user_row = connection.execute(
+            "SELECT id, username FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if user_row is None:
+            flash("Пользователь не найден.")
+            return redirect(url_for("admin_results"))
+        result = connection.execute(
+            """
+            SELECT id, score, total, created_at, answers
+            FROM results
+            WHERE id = ? AND user_id = ?
+            """,
+            (result_id, user_id),
+        ).fetchone()
+    if result is None:
+        flash("Попытка не найдена.")
+        return redirect(url_for("admin_user_results", user_id=user_id))
+    raw_answers = result["answers"] or "{}"
+    try:
+        answers = json.loads(raw_answers)
+    except json.JSONDecodeError:
+        answers = {}
+    return render_template(
+        "admin_attempt_detail.html",
+        selected_user=user_row,
+        result=result,
+        questions=QUESTIONS,
+        answers=answers,
+    )
 
 
 if __name__ == "__main__":
