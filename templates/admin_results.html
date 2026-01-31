@@ -1,0 +1,33 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <section class="card">
+    <h2>Пользователи и результаты</h2>
+    {% if users %}
+      <table>
+        <thead>
+          <tr>
+            <th>Пользователь</th>
+            <th>Попыток</th>
+            <th>Последняя попытка</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in users %}
+            <tr>
+              <td>
+                <a href="{{ url_for('admin_user_results', user_id=row.id) }}">
+                  {{ row.username }}
+                </a>
+              </td>
+              <td>{{ row.attempts }}</td>
+              <td>{{ row.last_attempt or "—" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Пользователей пока нет.</p>
+    {% endif %}
+  </section>
+{% endblock %}
