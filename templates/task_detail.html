@@ -6,17 +6,19 @@
     <p>{{ task.description }}</p>
     <form method="post">
       {% for question in questions %}
+        {% set question_index = loop.index0 %}
         <fieldset>
           <legend>{{ question.question }}</legend>
           {% for option in question.options %}
             <label class="option">
               <input
                 type="radio"
-                name="question-{{ loop.index0 }}"
+                name="question-{{ question_index }}"
                 value="{{ option }}"
-                required
+                id="question-{{ question_index }}-option-{{ loop.index0 }}"
+                {% if loop.first %}required{% endif %}
               />
-              {{ option }}
+              <span>{{ option }}</span>
             </label>
           {% endfor %}
         </fieldset>
