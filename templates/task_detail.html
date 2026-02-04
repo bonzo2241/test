@@ -1,0 +1,27 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>{{ task.title }}</h2>
+    <p>{{ task.description }}</p>
+    <form method="post">
+      {% for question in questions %}
+        <fieldset>
+          <legend>{{ question.question }}</legend>
+          {% for option in question.options %}
+            <label class="option">
+              <input
+                type="radio"
+                name="question-{{ loop.index0 }}"
+                value="{{ option }}"
+                required
+              />
+              {{ option }}
+            </label>
+          {% endfor %}
+        </fieldset>
+      {% endfor %}
+      <button type="submit">Отправить ответы</button>
+    </form>
+  </div>
+{% endblock %}
