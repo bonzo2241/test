@@ -3,18 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{{ title or "Простой тест" }}</title>
+    <title>{{ title or "Учебная поддержка" }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
   </head>
   <body>
     <header>
-      <h1>Учебный тест</h1>
+      <h1>Многоагентная поддержка обучения</h1>
       <nav>
         <a href="{{ url_for('index') }}">Главная</a>
         {% if user %}
-          <a href="{{ url_for('quiz') }}">Пройти тест</a>
+          <a href="{{ url_for('topics') }}">Темы и задания</a>
+          <a href="{{ url_for('support') }}">Поддержка</a>
           {% if user.is_admin %}
             <a href="{{ url_for('admin_results') }}">Результаты</a>
+            <a href="{{ url_for('admin_support') }}">Агент поддержки</a>
+            <a href="{{ url_for('teacher_topics') }}">Преподаватель</a>
           {% endif %}
           <a href="{{ url_for('logout') }}">Выйти ({{ user.username }})</a>
         {% else %}

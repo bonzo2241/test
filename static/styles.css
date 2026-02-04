@@ -64,10 +64,12 @@ label {
 }
 
 input[type="text"],
-input[type="password"] {
+input[type="password"],
+textarea {
   padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid #d0d0d0;
+  font-family: inherit;
 }
 
 button,
@@ -123,6 +125,36 @@ fieldset {
 
 .quiz-review {
   pointer-events: none;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f1f4fb;
+  padding: 16px;
+  border-radius: 12px;
+  gap: 16px;
+}
+
+.meta {
+  color: #4f5b72;
+  font-size: 14px;
+}
+
+blockquote {
+  margin: 0;
+  padding: 12px 16px;
+  background: #f5f5f5;
+  border-left: 4px solid #1f4b99;
+  border-radius: 8px;
 }
 
 table {

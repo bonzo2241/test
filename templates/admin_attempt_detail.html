@@ -1,45 +1,28 @@
 {% extends "layout.html" %}
 
 {% block content %}
-  <section class="card">
-    <h2>Попытка пользователя: {{ selected_user.username }}</h2>
-    <p>
-      <strong>Результат:</strong> {{ result.score }} / {{ result.total }} |
-      <strong>Дата:</strong> {{ result.created_at }}
-    </p>
-    <p>
-      <a href="{{ url_for('admin_user_results', user_id=selected_user.id) }}">
-        ← Назад к попыткам пользователя
-      </a>
-    </p>
-    <form class="quiz-review">
-      {% for item in questions %}
-        {% set q_index = loop.index0 %}
-        {% set q_key = q_index|string %}
-        {% set selected = answers.get(q_key) %}
+  <div class="card">
+    <h2>Попытка: {{ selected_user.username }}</h2>
+    <p>Задание: {{ result.task_title }}</p>
+    <p>Результат: {{ result.score }} / {{ result.total }}</p>
+    <div class="quiz-review">
+      {% for question in questions %}
         <fieldset>
-          <legend>{{ loop.index }}. {{ item.question }}</legend>
-          {% for option in item.options %}
-            {% set is_correct = option == item.answer %}
-            {% set is_selected = option == selected %}
-            <label class="option {% if is_correct %}correct{% endif %} {% if is_selected and not is_correct %}wrong{% endif %}">
-              <input
-                type="radio"
-                name="question-{{ q_index }}"
-                value="{{ option }}"
-                {% if is_selected %}checked{% endif %}
-                disabled
-              />
-              {{ option }}
-              {% if is_correct %}
-                <span class="badge">Верный ответ</span>
-              {% elif is_selected %}
+          <legend>{{ question.question }}</legend>
+          {% set q_index = loop.index0 %}
+          {% for option in question.options %}
+            {% set is_selected = answers.get(q_index|string) == option %}
+            {% set is_correct = question.answer == option %}
+            <div class="option {% if is_selected and is_correct %}correct{% elif is_selected and not is_correct %}wrong{% endif %}">
+              <span>{{ option }}</span>
+              {% if is_selected %}
                 <span class="badge">Ответ пользователя</span>
               {% endif %}
-            </label>
+            </div>
           {% endfor %}
         </fieldset>
       {% endfor %}
-    </form>
-  </section>
+    </div>
+    <a class="button" href="{{ url_for('admin_user_results', user_id=selected_user.id) }}">Назад</a>
+  </div>
 {% endblock %}
