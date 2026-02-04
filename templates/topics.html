@@ -1,0 +1,22 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Темы курса: история России XV–XIX веков</h2>
+    <ul class="list">
+      {% for topic in topics %}
+        <li class="list-item">
+          <div>
+            <h3>{{ topic.title }}</h3>
+            <p>{{ topic.description }}</p>
+            <p class="meta">
+              Заданий: {{ topic.task_count }}
+              • Выполнено: {{ progress_map.get(topic.id, 0) }}
+            </p>
+          </div>
+          <a class="button" href="{{ url_for('topic_detail', topic_id=topic.id) }}">Открыть</a>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endblock %}

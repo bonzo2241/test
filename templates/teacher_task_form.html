@@ -1,0 +1,26 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Новое задание для темы «{{ topic.title }}»</h2>
+    <form method="post">
+      <label>
+        Название задания
+        <input type="text" name="title" required />
+      </label>
+      <label>
+        Описание задания
+        <input type="text" name="description" required />
+      </label>
+      <label>
+        Дата дедлайна (ISO, например 2025-12-01T12:00:00)
+        <input type="text" name="due_date" />
+      </label>
+      <label>
+        Вопросы (JSON массив)
+        <textarea name="questions" rows="10" required>{{ example }}</textarea>
+      </label>
+      <button type="submit">Сохранить</button>
+    </form>
+  </div>
+{% endblock %}

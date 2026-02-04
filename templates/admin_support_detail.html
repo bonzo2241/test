@@ -1,0 +1,58 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Поддержка: {{ selected_user.username }}</h2>
+    <p class="meta">Статус: <strong>{{ report.risk_level }}</strong></p>
+
+    <h3>Мониторинг активности</h3>
+    <ul>
+      <li>Последняя активность: {{ report.monitoring.last_seen or "нет данных" }}</li>
+      <li>Дней без активности: {{ report.monitoring.days_since_last or "нет данных" }}</li>
+      <li>Посещения: {{ report.monitoring.visits }}</li>
+      <li>Выполнено заданий: {{ report.monitoring.completed_tasks }} из {{ report.monitoring.total_tasks }}</li>
+      <li>
+        Средний результат:
+        {% if report.monitoring.average_score is not none %}
+          {{ (report.monitoring.average_score * 100) | round(0) }}%
+        {% else %}
+          нет данных
+        {% endif %}
+      </li>
+      <li>Просроченных попыток: {{ report.monitoring.late_submissions }}</li>
+    </ul>
+
+    <h3>Диагностика</h3>
+    <ul>
+      {% for reason in report.risk_reasons %}
+        <li>{{ reason }}</li>
+      {% endfor %}
+    </ul>
+
+    <h3>Слабые места</h3>
+    {% if report.area_stats %}
+      <ul>
+        {% for area in report.area_stats %}
+          <li>{{ area.area }} — точность {{ (area.accuracy * 100) | round(0) }}% ({{ area.total }} вопросов)</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>Пока нет данных по заданиям.</p>
+    {% endif %}
+
+    <h3>Рекомендации</h3>
+    <ul>
+      {% for item in report.recommendations %}
+        <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+
+    <h3>Оптимизация учебного плана</h3>
+    <p>{{ report.plan_tip }}</p>
+
+    <h3>Черновик комментария преподавателя</h3>
+    <blockquote>{{ comment_draft }}</blockquote>
+
+    <a class="button secondary" href="{{ url_for('admin_support') }}">Назад к списку</a>
+  </div>
+{% endblock %}
