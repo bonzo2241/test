@@ -1,0 +1,28 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Попытка: {{ selected_user.username }}</h2>
+    <p>Задание: {{ result.task_title }}</p>
+    <p>Результат: {{ result.score }} / {{ result.total }}</p>
+    <div class="quiz-review">
+      {% for question in questions %}
+        <fieldset>
+          <legend>{{ question.question }}</legend>
+          {% set q_index = loop.index0 %}
+          {% for option in question.options %}
+            {% set is_selected = answers.get(q_index|string) == option %}
+            {% set is_correct = question.answer == option %}
+            <div class="option {% if is_selected and is_correct %}correct{% elif is_selected and not is_correct %}wrong{% endif %}">
+              <span>{{ option }}</span>
+              {% if is_selected %}
+                <span class="badge">Ответ пользователя</span>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </fieldset>
+      {% endfor %}
+    </div>
+    <a class="button" href="{{ url_for('admin_user_results', user_id=selected_user.id) }}">Назад</a>
+  </div>
+{% endblock %}

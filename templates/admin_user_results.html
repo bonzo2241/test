@@ -1,0 +1,34 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Попытки: {{ selected_user.username }}</h2>
+    {% if attempts %}
+      <table>
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Задание</th>
+            <th>Результат</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for attempt in attempts %}
+            <tr>
+              <td>{{ attempt.created_at }}</td>
+              <td>{{ attempt.task_title }}</td>
+              <td>{{ attempt.score }} / {{ attempt.total }}</td>
+              <td>
+                <a class="button secondary" href="{{ url_for('admin_attempt_detail', user_id=selected_user.id, result_id=attempt.id) }}">Открыть</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Попыток ещё нет.</p>
+    {% endif %}
+    <a class="button" href="{{ url_for('admin_user_profile', user_id=selected_user.id) }}">Назад</a>
+  </div>
+{% endblock %}
