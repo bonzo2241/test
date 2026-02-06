@@ -14,173 +14,32 @@ DATABASE = BASE_DIR / "app.db"
 app = Flask(__name__)
 app.secret_key = "dev-secret-change-me"
 
-SEED_TOPICS = [
-    {
-        "title": "XV век: централизация Руси",
-        "description": "Итоги борьбы за независимость и рост Москвы как центра",
-    },
-    {
-        "title": "XVI век: формирование Русского царства",
-        "description": "Реформы Ивана IV и расширение границ государства",
-    },
-    {
-        "title": "XVII век: Смутное время и первые Романовы",
-        "description": "Кризис власти, восстановление государства и реформы",
-    },
-    {
-        "title": "XVIII век: реформы Петра I и империя",
-        "description": "Модернизация страны, армия, флот и новые столицы",
-    },
-    {
-        "title": "XIX век: реформы и общественные движения",
-        "description": "Отечественная война 1812 года, реформы и новые идеи",
-    },
-]
+SEED_CONTENT_PATH = BASE_DIR / "content" / "seed_content.json"
 
-SEED_TASKS = [
-    {
-        "topic_title": "XV век: централизация Руси",
-        "title": "Мини-тест: завершение монгольской зависимости",
-        "description": "Проверьте знания по ключевым событиям XV века.",
-        "task_type": "quiz",
-        "questions": [
-            {
-                "question": "В каком году произошло стояние на реке Угре?",
-                "options": ["1480", "1380", "1497"],
-                "answer": "1480",
-                "area": "XV век",
-            },
-            {
-                "question": "Какой князь присоединил Новгород к Москве?",
-                "options": ["Иван III", "Василий II", "Дмитрий Донской"],
-                "answer": "Иван III",
-                "area": "XV век",
-            },
-            {
-                "question": "Как называется первый общерусский Судебник?",
-                "options": ["Судебник 1497", "Русская Правда", "Соборное уложение"],
-                "answer": "Судебник 1497",
-                "area": "XV век",
-            },
-        ],
-    },
-    {
-        "topic_title": "XVI век: формирование Русского царства",
-        "title": "Мини-тест: эпоха Ивана Грозного",
-        "description": "События и реформы XVI века.",
-        "task_type": "quiz",
-        "questions": [
-            {
-                "question": "В каком году произошло венчание Ивана IV на царство?",
-                "options": ["1547", "1552", "1565"],
-                "answer": "1547",
-                "area": "XVI век",
-            },
-            {
-                "question": "Какой город был взят в ходе Казанского похода 1552 года?",
-                "options": ["Казань", "Астрахань", "Псков"],
-                "answer": "Казань",
-                "area": "XVI век",
-            },
-            {
-                "question": "Как называется политика, введённая Иваном IV в 1565 году?",
-                "options": ["Опричнина", "Земщина", "Соборность"],
-                "answer": "Опричнина",
-                "area": "XVI век",
-            },
-        ],
-    },
-    {
-        "topic_title": "XVII век: Смутное время и первые Романовы",
-        "title": "Мини-тест: Смутное время",
-        "description": "Проверьте знания о событиях начала XVII века.",
-        "task_type": "quiz",
-        "questions": [
-            {
-                "question": "Кто возглавил Второе народное ополчение 1612 года?",
-                "options": [
-                    "Кузьма Минин и Дмитрий Пожарский",
-                    "Борис Годунов",
-                    "Василий Шуйский",
-                ],
-                "answer": "Кузьма Минин и Дмитрий Пожарский",
-                "area": "XVII век",
-            },
-            {
-                "question": "В каком году Земский собор избрал Михаила Романова?",
-                "options": ["1613", "1598", "1649"],
-                "answer": "1613",
-                "area": "XVII век",
-            },
-            {
-                "question": "Как называется свод законов 1649 года?",
-                "options": ["Соборное уложение", "Судебник 1550", "Табель о рангах"],
-                "answer": "Соборное уложение",
-                "area": "XVII век",
-            },
-        ],
-    },
-    {
-        "topic_title": "XVIII век: реформы Петра I и империя",
-        "title": "Мини-тест: реформы Петра I",
-        "description": "Ключевые преобразования начала XVIII века.",
-        "task_type": "quiz",
-        "questions": [
-            {
-                "question": "В каком году была основана Санкт-Петербург?",
-                "options": ["1703", "1721", "1682"],
-                "answer": "1703",
-                "area": "XVIII век",
-            },
-            {
-                "question": "Какой документ ввёл служебную иерархию в 1722 году?",
-                "options": ["Табель о рангах", "Жалованная грамота", "Соборное уложение"],
-                "answer": "Табель о рангах",
-                "area": "XVIII век",
-            },
-            {
-                "question": "Как завершилась Северная война 1700–1721 гг.?",
-                "options": ["Ништадтским миром", "Полтавской битвой", "Андрусовским перемирием"],
-                "answer": "Ништадтским миром",
-                "area": "XVIII век",
-            },
-        ],
-    },
-    {
-        "topic_title": "XIX век: реформы и общественные движения",
-        "title": "Мини-тест: XIX век",
-        "description": "Главные события и реформы XIX века.",
-        "task_type": "quiz",
-        "questions": [
-            {
-                "question": "В каком году была отменена крепостная зависимость?",
-                "options": ["1861", "1812", "1905"],
-                "answer": "1861",
-                "area": "XIX век",
-            },
-            {
-                "question": "Как называется восстание 1825 года на Сенатской площади?",
-                "options": ["Декабристов", "Пугачёвское", "Стрелецкое"],
-                "answer": "Декабристов",
-                "area": "XIX век",
-            },
-            {
-                "question": "Кто командовал русской армией в Бородинском сражении?",
-                "options": ["М.И. Кутузов", "А.В. Суворов", "П.С. Нахимов"],
-                "answer": "М.И. Кутузов",
-                "area": "XIX век",
-            },
-        ],
-    },
-]
 
-MATERIALS = {
-    "XV век": "Повторите тему: стояние на Угре и политика Ивана III.",
-    "XVI век": "Повторите тему: реформы Избранной рады и опричнина.",
-    "XVII век": "Повторите тему: Смутное время и первые Романовы.",
-    "XVIII век": "Повторите тему: реформы Петра I и Северная война.",
-    "XIX век": "Повторите тему: реформы Александра II и движение декабристов.",
-}
+def load_seed_content() -> tuple[list[dict], list[dict], dict[str, str]]:
+    if not SEED_CONTENT_PATH.exists():
+        return [], [], {}
+    try:
+        raw_content = json.loads(SEED_CONTENT_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return [], [], {}
+
+    topics = raw_content.get("topics", [])
+    tasks = raw_content.get("tasks", [])
+    materials = raw_content.get("materials", {})
+
+    if not isinstance(topics, list):
+        topics = []
+    if not isinstance(tasks, list):
+        tasks = []
+    if not isinstance(materials, dict):
+        materials = {}
+
+    return topics, tasks, {str(key): str(value) for key, value in materials.items()}
+
+
+SEED_TOPICS, SEED_TASKS, SEED_MATERIALS = load_seed_content()
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -517,14 +376,20 @@ def evaluate_risk(monitoring: dict) -> tuple[str, list[str]]:
     return "Норма", ["Риски не обнаружены."]
 
 
+def material_hint(area_name: str) -> str:
+    return SEED_MATERIALS.get(
+        area_name,
+        f"Повторите материалы по разделу «{area_name}» и выполните дополнительные упражнения.",
+    )
+
+
 def build_recommendations(
     monitoring: dict, area_stats: list[dict], risk_level: str
 ) -> list[str]:
     recommendations = []
     for area in area_stats:
         if area["accuracy"] < 0.7:
-            material = MATERIALS.get(area["area"], "Повторите тему и выполните дополнительные упражнения.")
-            recommendations.append(f"{area['area']}: {material}")
+            recommendations.append(f"{area['area']}: {material_hint(area['area'])}")
     if risk_level in {"Высокий риск", "Зона риска"}:
         recommendations.append(
             "Рекомендуется консультация с преподавателем или наставником."
@@ -1068,7 +933,7 @@ def teacher_new_task(topic_id: int):
                 "question": "Пример вопроса",
                 "options": ["Ответ 1", "Ответ 2", "Ответ 3"],
                 "answer": "Ответ 1",
-                "area": "Тема",
+                "area": "Раздел/навык",
             }
         ],
         ensure_ascii=False,
