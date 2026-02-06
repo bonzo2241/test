@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ontology import LearningOntology
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -17,17 +18,18 @@ app.secret_key = "dev-secret-change-me"
 SEED_CONTENT_PATH = BASE_DIR / "content" / "seed_content.json"
 
 
-def load_seed_content() -> tuple[list[dict], list[dict], dict[str, str]]:
+def load_seed_content() -> tuple[list[dict], list[dict], dict[str, str], dict]:
     if not SEED_CONTENT_PATH.exists():
-        return [], [], {}
+        return [], [], {}, {}
     try:
         raw_content = json.loads(SEED_CONTENT_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return [], [], {}
+        return [], [], {}, {}
 
     topics = raw_content.get("topics", [])
     tasks = raw_content.get("tasks", [])
     materials = raw_content.get("materials", {})
+    ontology = raw_content.get("ontology", {})
 
     if not isinstance(topics, list):
         topics = []
@@ -35,11 +37,14 @@ def load_seed_content() -> tuple[list[dict], list[dict], dict[str, str]]:
         tasks = []
     if not isinstance(materials, dict):
         materials = {}
+    if not isinstance(ontology, dict):
+        ontology = {}
 
-    return topics, tasks, {str(key): str(value) for key, value in materials.items()}
+    return topics, tasks, {str(key): str(value) for key, value in materials.items()}, ontology
 
 
-SEED_TOPICS, SEED_TASKS, SEED_MATERIALS = load_seed_content()
+SEED_TOPICS, SEED_TASKS, SEED_MATERIALS, SEED_ONTOLOGY = load_seed_content()
+LEARNING_ONTOLOGY = LearningOntology.from_seed_content(SEED_TOPICS, SEED_TASKS, SEED_ONTOLOGY)
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -346,7 +351,7 @@ def get_area_performance(user_id: int) -> list[dict]:
             content = {}
         questions = content.get("questions", [])
         for index, question in enumerate(questions):
-            area = question.get("area", "Общее")
+            area = LEARNING_ONTOLOGY.concept_for_question(question, "Общее")
             areas.setdefault(area, {"correct": 0, "total": 0})
             areas[area]["total"] += 1
             if answers.get(str(index)) == question.get("answer"):
@@ -387,9 +392,17 @@ def build_recommendations(
     monitoring: dict, area_stats: list[dict], risk_level: str
 ) -> list[str]:
     recommendations = []
+    weak_concepts: list[str] = []
     for area in area_stats:
         if area["accuracy"] < 0.7:
+            weak_concepts.append(area["area"])
             recommendations.append(f"{area['area']}: {material_hint(area['area'])}")
+
+    for concept in LEARNING_ONTOLOGY.infer_support_concepts(weak_concepts):
+        recommendations.append(
+            f"Рекомендуется повторить опорный раздел «{concept}», связанный с текущими ошибками."
+        )
+
     if risk_level in {"Высокий риск", "Зона риска"}:
         recommendations.append(
             "Рекомендуется консультация с преподавателем или наставником."
@@ -630,6 +643,22 @@ def support():
     )
 
 
+
+
+@app.route("/ontology")
+def ontology_export():
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+    if not user["is_admin"]:
+        flash("Недостаточно прав для просмотра онтологии.")
+        return redirect(url_for("index"))
+    return app.response_class(
+        LEARNING_ONTOLOGY.to_turtle(),
+        mimetype="text/turtle; charset=utf-8",
+        headers={"Content-Disposition": "inline; filename=ontology.ttl"},
+    )
 @app.route("/admin/results")
 def admin_results():
     return redirect(url_for("admin_users"))

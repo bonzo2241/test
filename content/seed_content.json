@@ -219,5 +219,43 @@
     "XVII век": "Повторите тему: Смутное время и первые Романовы.",
     "XVIII век": "Повторите тему: реформы Петра I и Северная война.",
     "XIX век": "Повторите тему: реформы Александра II и движение декабристов."
+  },
+  "ontology": {
+    "subject": "История России",
+    "concepts": [
+      {
+        "id": "xv-century",
+        "label": "XV век",
+        "prerequisites": []
+      },
+      {
+        "id": "xvi-century",
+        "label": "XVI век",
+        "prerequisites": [
+          "XV век"
+        ]
+      },
+      {
+        "id": "xvii-century",
+        "label": "XVII век",
+        "prerequisites": [
+          "XVI век"
+        ]
+      },
+      {
+        "id": "xviii-century",
+        "label": "XVIII век",
+        "prerequisites": [
+          "XVII век"
+        ]
+      },
+      {
+        "id": "xix-century",
+        "label": "XIX век",
+        "prerequisites": [
+          "XVIII век"
+        ]
+      }
+    ]
   }
 }

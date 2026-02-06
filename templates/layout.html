@@ -17,6 +17,7 @@
           {% if user.is_admin %}
             <a href="{{ url_for('admin_users') }}">Профили пользователей</a>
             <a href="{{ url_for('admin_support') }}">Агент поддержки</a>
+            <a href="{{ url_for('ontology_export') }}">Онтология</a>
             <a href="{{ url_for('teacher_topics') }}">Преподаватель</a>
           {% endif %}
           <a href="{{ url_for('logout') }}">Выйти ({{ user.username }})</a>
