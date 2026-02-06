@@ -2,7 +2,7 @@
 
 {% block content %}
   <div class="card">
-    <h2>Результаты студентов</h2>
+    <h2>Пользователи</h2>
     <table>
       <thead>
         <tr>
@@ -19,7 +19,7 @@
             <td>{{ row.attempts }}</td>
             <td>{{ row.last_attempt or "нет" }}</td>
             <td>
-              <a class="button secondary" href="{{ url_for('admin_user_results', user_id=row.id) }}">Посмотреть</a>
+              <a class="button secondary" href="{{ url_for('admin_user_profile', user_id=row.id) }}">Открыть профиль</a>
             </td>
           </tr>
         {% endfor %}

@@ -29,6 +29,6 @@
     {% else %}
       <p>Попыток ещё нет.</p>
     {% endif %}
-    <a class="button" href="{{ url_for('admin_results') }}">Назад</a>
+    <a class="button" href="{{ url_for('admin_user_profile', user_id=selected_user.id) }}">Назад</a>
   </div>
 {% endblock %}

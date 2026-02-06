@@ -767,6 +767,11 @@ def support():
 
 @app.route("/admin/results")
 def admin_results():
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/users")
+def admin_users():
     user = current_user()
     if user is None:
         flash("Сначала войдите.")
@@ -789,7 +794,38 @@ def admin_results():
     return render_template("admin_results.html", users=users)
 
 
-@app.route("/admin/results/users/<int:user_id>")
+@app.route("/admin/users/<int:user_id>")
+def admin_user_profile(user_id: int):
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+    if not user["is_admin"]:
+        flash("Недостаточно прав для просмотра профилей.")
+        return redirect(url_for("index"))
+    with get_db_connection() as connection:
+        selected_user = connection.execute(
+            "SELECT id, username, is_admin FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if selected_user is None:
+            flash("Пользователь не найден.")
+            return redirect(url_for("admin_users"))
+        attempts_stats = connection.execute(
+            """
+            SELECT COUNT(*) AS attempts, MAX(created_at) AS last_attempt
+            FROM task_attempts
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+    return render_template(
+        "admin_user_profile.html",
+        selected_user=selected_user,
+        attempts_stats=attempts_stats,
+    )
+
+
+@app.route("/admin/users/<int:user_id>/results")
 def admin_user_results(user_id: int):
     user = current_user()
     if user is None:
@@ -804,7 +840,7 @@ def admin_user_results(user_id: int):
         ).fetchone()
         if user_row is None:
             flash("Пользователь не найден.")
-            return redirect(url_for("admin_results"))
+            return redirect(url_for("admin_users"))
         attempts = connection.execute(
             """
             SELECT task_attempts.id, task_attempts.score, task_attempts.total,
@@ -823,7 +859,7 @@ def admin_user_results(user_id: int):
     )
 
 
-@app.route("/admin/results/users/<int:user_id>/attempts/<int:result_id>")
+@app.route("/admin/users/<int:user_id>/results/attempts/<int:result_id>")
 def admin_attempt_detail(user_id: int, result_id: int):
     user = current_user()
     if user is None:
@@ -838,7 +874,7 @@ def admin_attempt_detail(user_id: int, result_id: int):
         ).fetchone()
         if user_row is None:
             flash("Пользователь не найден.")
-            return redirect(url_for("admin_results"))
+            return redirect(url_for("admin_users"))
         result = connection.execute(
             """
             SELECT task_attempts.id, task_attempts.score, task_attempts.total,
