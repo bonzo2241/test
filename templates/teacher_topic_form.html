@@ -1,0 +1,18 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Новая тема</h2>
+    <form method="post">
+      <label>
+        Название темы
+        <input type="text" name="title" required />
+      </label>
+      <label>
+        Описание темы
+        <input type="text" name="description" required />
+      </label>
+      <button type="submit">Сохранить</button>
+    </form>
+  </div>
+{% endblock %}
