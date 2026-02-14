@@ -1,0 +1,11 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Адаптивный набор завершён</h2>
+    <p>Задание: {{ adaptive_task.title }}</p>
+    <p>Целевые разделы: {{ source_concepts | join(', ') }}</p>
+    <p>Ваш результат: {{ score }} из {{ total }}.</p>
+    <a class="button" href="{{ url_for('support') }}">Вернуться в поддержку</a>
+  </div>
+{% endblock %}

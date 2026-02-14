@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import random
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib import error, request as urlrequest
 
 from ontology import LearningOntology
 from flask import Flask, flash, redirect, render_template, request, session, url_for
@@ -138,6 +141,37 @@ def init_db() -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS adaptive_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                source_concepts TEXT NOT NULL DEFAULT '[]',
+                content_json TEXT NOT NULL,
+                llm_used INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'ready',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS adaptive_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                adaptive_task_id INTEGER NOT NULL,
+                score INTEGER NOT NULL,
+                total INTEGER NOT NULL,
+                answers TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(adaptive_task_id) REFERENCES adaptive_tasks(id)
+            )
+            """
+        )
         connection.commit()
 
     ensure_admin_user()
@@ -261,6 +295,207 @@ def evaluate_quiz(questions: list[dict], form: dict) -> tuple[int, dict]:
         if answer_value == question.get("answer"):
             score += 1
     return score, stored_answers
+
+
+def weak_concepts(area_stats: list[dict], threshold: float = 0.7) -> list[str]:
+    return [item["area"] for item in area_stats if item["accuracy"] < threshold]
+
+
+def recent_adaptive_tasks(user_id: int, limit: int = 5) -> list[sqlite3.Row]:
+    with get_db_connection() as connection:
+        return connection.execute(
+            """
+            SELECT id, title, description, status, llm_used, created_at
+            FROM adaptive_tasks
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+
+
+def wrong_question_examples(user_id: int, concepts: list[str], limit: int = 8) -> list[dict]:
+    concept_set = set(concepts)
+    examples: list[dict] = []
+    with get_db_connection() as connection:
+        attempts = connection.execute(
+            """
+            SELECT task_attempts.answers, tasks.content_json
+            FROM task_attempts
+            JOIN tasks ON tasks.id = task_attempts.task_id
+            WHERE task_attempts.user_id = ?
+            ORDER BY task_attempts.created_at DESC
+            LIMIT 20
+            """,
+            (user_id,),
+        ).fetchall()
+
+    for attempt in attempts:
+        if len(examples) >= limit:
+            break
+        try:
+            answers = json.loads(attempt["answers"])
+        except json.JSONDecodeError:
+            answers = {}
+        try:
+            questions = json.loads(attempt["content_json"]).get("questions", [])
+        except json.JSONDecodeError:
+            questions = []
+        for index, question in enumerate(questions):
+            concept = LEARNING_ONTOLOGY.concept_for_question(question, "Общее")
+            if concept_set and concept not in concept_set:
+                continue
+            selected = answers.get(str(index))
+            if selected == question.get("answer"):
+                continue
+            examples.append(
+                {
+                    "question": question.get("question", ""),
+                    "correct": question.get("answer", ""),
+                    "selected": selected or "нет ответа",
+                    "concept": concept,
+                }
+            )
+            if len(examples) >= limit:
+                break
+    return examples
+
+
+def llm_generate_adaptive_questions(concepts: list[str], examples: list[dict]) -> list[dict] | None:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    payload = {
+        "model": os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+        "temperature": 0.3,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Сгенерируй адаптивные учебные задания в формате JSON. "
+                    "Нужен только JSON-массив объектов с полями question, options, answer, concept."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "concepts": concepts,
+                        "wrong_examples": examples,
+                        "constraints": {
+                            "count": 5,
+                            "single_correct_answer": True,
+                            "options_count": 4,
+                            "language": "ru",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ],
+    }
+    api_url = os.environ.get("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions")
+    req = urlrequest.Request(
+        api_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except (error.URLError, TimeoutError, json.JSONDecodeError):
+        return None
+
+    try:
+        content = result["choices"][0]["message"]["content"]
+        generated = json.loads(content)
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError):
+        return None
+    return generated if isinstance(generated, list) else None
+
+
+def fallback_adaptive_questions(concepts: list[str], examples: list[dict]) -> list[dict]:
+    questions: list[dict] = []
+    pool = examples[:5] if examples else []
+    for item in pool:
+        distractors = [
+            item["selected"],
+            "Вариант A",
+            "Вариант B",
+            item["correct"],
+        ]
+        random.shuffle(distractors)
+        questions.append(
+            {
+                "question": f"Выберите корректный ответ: {item['question']}",
+                "options": list(dict.fromkeys(distractors))[:4],
+                "answer": item["correct"],
+                "concept": item["concept"],
+            }
+        )
+
+    if not questions:
+        for concept in concepts[:3] or ["Общее"]:
+            questions.append(
+                {
+                    "question": f"Контрольный вопрос по разделу «{concept}». Выберите верное утверждение.",
+                    "options": [
+                        f"Корректный факт по теме {concept}",
+                        f"Ошибочный факт 1 по теме {concept}",
+                        f"Ошибочный факт 2 по теме {concept}",
+                        f"Ошибочный факт 3 по теме {concept}",
+                    ],
+                    "answer": f"Корректный факт по теме {concept}",
+                    "concept": concept,
+                }
+            )
+    return questions
+
+
+def normalize_generated_questions(raw_questions: list[dict], concepts: list[str]) -> list[dict]:
+    normalized: list[dict] = []
+    concept_default = concepts[0] if concepts else "Общее"
+    for question in raw_questions:
+        text = str(question.get("question", "")).strip()
+        options = question.get("options", [])
+        answer = str(question.get("answer", "")).strip()
+        concept = str(question.get("concept", concept_default)).strip() or concept_default
+        if not text or not isinstance(options, list):
+            continue
+        clean_options = [str(option).strip() for option in options if str(option).strip()]
+        clean_options = list(dict.fromkeys(clean_options))
+        if answer not in clean_options:
+            if clean_options:
+                answer = clean_options[0]
+            else:
+                continue
+        if len(clean_options) < 2:
+            continue
+        normalized.append(
+            {
+                "question": text,
+                "options": clean_options[:4],
+                "answer": answer,
+                "concept": concept,
+            }
+        )
+    return normalized
+
+
+def generate_adaptive_questions(user_id: int, concepts: list[str]) -> tuple[list[dict], bool]:
+    examples = wrong_question_examples(user_id, concepts)
+    llm_questions = llm_generate_adaptive_questions(concepts, examples)
+    if llm_questions:
+        normalized = normalize_generated_questions(llm_questions, concepts)
+        if normalized:
+            return normalized, True
+    fallback = normalize_generated_questions(fallback_adaptive_questions(concepts, examples), concepts)
+    return fallback, False
 
 
 def get_monitoring_data(user_id: int) -> dict:
@@ -449,6 +684,7 @@ def support_report_for_user(user_id: int) -> dict:
     return {
         "monitoring": monitoring,
         "area_stats": area_stats,
+        "weak_concepts": weak_concepts(area_stats),
         "risk_level": risk_level,
         "risk_reasons": reasons,
         "recommendations": recommendations,
@@ -640,6 +876,130 @@ def support():
         report=report,
         comment_draft=comment_draft,
         for_user=user,
+        adaptive_tasks=recent_adaptive_tasks(user["id"]),
+    )
+
+
+@app.route("/adaptive/generate", methods=["POST"])
+def adaptive_generate():
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+
+    report = support_report_for_user(user["id"])
+    concepts = report["weak_concepts"]
+    if not concepts and report["risk_level"] not in {"Зона риска", "Высокий риск"}:
+        flash("Сейчас адаптивный набор не требуется: серьёзных рисков не обнаружено.")
+        return redirect(url_for("support"))
+
+    target_concepts = concepts[:3] or ["Общее"]
+    questions, llm_used = generate_adaptive_questions(user["id"], target_concepts)
+    if not questions:
+        flash("Не удалось сгенерировать адаптивные задания. Попробуйте позже.")
+        return redirect(url_for("support"))
+
+    with get_db_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO adaptive_tasks (
+                user_id, title, description, source_concepts, content_json,
+                llm_used, status, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'ready', ?)
+            """,
+            (
+                user["id"],
+                f"Адаптивная практика: {', '.join(target_concepts)}",
+                "Набор сформирован на основе слабых мест и последних ошибок.",
+                json.dumps(target_concepts, ensure_ascii=False),
+                json.dumps({"questions": questions}, ensure_ascii=False),
+                1 if llm_used else 0,
+                now_iso(),
+            ),
+        )
+        connection.commit()
+        adaptive_task_id = cursor.lastrowid
+
+    log_activity(
+        user["id"],
+        "generate_adaptive_task",
+        {"adaptive_task_id": adaptive_task_id, "concepts": target_concepts, "llm_used": llm_used},
+    )
+    flash("Адаптивный набор готов. Пройдите его для проверки прогресса.")
+    return redirect(url_for("adaptive_task_detail", adaptive_task_id=adaptive_task_id))
+
+
+@app.route("/adaptive/tasks/<int:adaptive_task_id>", methods=["GET", "POST"])
+def adaptive_task_detail(adaptive_task_id: int):
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+
+    with get_db_connection() as connection:
+        adaptive_task = connection.execute(
+            """
+            SELECT id, user_id, title, description, source_concepts, content_json, llm_used, created_at
+            FROM adaptive_tasks
+            WHERE id = ?
+            """,
+            (adaptive_task_id,),
+        ).fetchone()
+    if adaptive_task is None or adaptive_task["user_id"] != user["id"]:
+        flash("Адаптивное задание не найдено.")
+        return redirect(url_for("support"))
+
+    try:
+        payload = json.loads(adaptive_task["content_json"])
+    except json.JSONDecodeError:
+        payload = {}
+    questions = payload.get("questions", [])
+    try:
+        source_concepts = json.loads(adaptive_task["source_concepts"])
+    except json.JSONDecodeError:
+        source_concepts = []
+
+    if request.method == "POST":
+        score, stored_answers = evaluate_quiz(questions, request.form)
+        with get_db_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO adaptive_attempts (user_id, adaptive_task_id, score, total, answers, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user["id"],
+                    adaptive_task_id,
+                    score,
+                    len(questions),
+                    json.dumps(stored_answers, ensure_ascii=False),
+                    now_iso(),
+                ),
+            )
+            connection.execute(
+                "UPDATE adaptive_tasks SET status = 'completed' WHERE id = ?",
+                (adaptive_task_id,),
+            )
+            connection.commit()
+        log_activity(
+            user["id"],
+            "submit_adaptive_task",
+            {"adaptive_task_id": adaptive_task_id, "score": score},
+        )
+        return render_template(
+            "adaptive_task_result.html",
+            adaptive_task=adaptive_task,
+            score=score,
+            total=len(questions),
+            source_concepts=source_concepts,
+        )
+
+    return render_template(
+        "adaptive_task_detail.html",
+        adaptive_task=adaptive_task,
+        questions=questions,
+        source_concepts=source_concepts,
     )
 
 

@@ -1,0 +1,30 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>{{ adaptive_task.title }}</h2>
+    <p>{{ adaptive_task.description }}</p>
+    <p class="meta">Целевые разделы: {{ source_concepts | join(', ') }}</p>
+    <p class="meta">Источник генерации: {{ "LLM" if adaptive_task.llm_used else "встроенный адаптер" }}</p>
+    <form method="post">
+      {% for question in questions %}
+        {% set question_index = loop.index0 %}
+        <fieldset>
+          <legend>{{ question.question }}</legend>
+          {% for option in question.options %}
+            <label class="option">
+              <input
+                type="radio"
+                name="question-{{ question_index }}"
+                value="{{ option }}"
+                {% if loop.first %}required{% endif %}
+              />
+              <span>{{ option }}</span>
+            </label>
+          {% endfor %}
+        </fieldset>
+      {% endfor %}
+      <button type="submit">Отправить адаптивные ответы</button>
+    </form>
+  </div>
+{% endblock %}
