@@ -1,0 +1,9 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <section class="card">
+    <h2>Результат</h2>
+    <p>Вы набрали {{ score }} из {{ total }}.</p>
+    <a class="button" href="{{ url_for('quiz') }}">Пройти ещё раз</a>
+  </section>
+{% endblock %}
