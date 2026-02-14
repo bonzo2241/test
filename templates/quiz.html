@@ -1,0 +1,28 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <section class="card">
+    <h2>Тест</h2>
+    <form method="post">
+      {% for item in questions %}
+        {% set question_index = loop.index0 %}
+        <fieldset>
+          <legend>{{ loop.index }}. {{ item.question }}</legend>
+          {% for option in item.options %}
+            <label class="option">
+              <input
+                type="radio"
+                name="question-{{ question_index }}"
+                value="{{ option }}"
+                id="question-{{ question_index }}-option-{{ loop.index0 }}"
+                {% if loop.first %}required{% endif %}
+              />
+              <span>{{ option }}</span>
+            </label>
+          {% endfor %}
+        </fieldset>
+      {% endfor %}
+      <button type="submit">Отправить</button>
+    </form>
+  </section>
+{% endblock %}
