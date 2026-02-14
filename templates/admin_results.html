@@ -20,6 +20,9 @@
             <td>{{ row.last_attempt or "нет" }}</td>
             <td>
               <a class="button secondary" href="{{ url_for('admin_user_profile', user_id=row.id) }}">Открыть профиль</a>
+              <form method="post" action="{{ url_for('admin_delete_user', user_id=row.id) }}">
+                <button type="submit">Удалить пользователя</button>
+              </form>
             </td>
           </tr>
         {% endfor %}

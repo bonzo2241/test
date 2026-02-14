@@ -22,6 +22,7 @@ SEED_CONTENT_PATH = BASE_DIR / "content" / "seed_content.json"
 
 
 def load_seed_content() -> tuple[list[dict], list[dict], dict[str, str], dict]:
+    """Загружает стартовый контент курса и онтологию из JSON-файла."""
     if not SEED_CONTENT_PATH.exists():
         return [], [], {}, {}
     try:
@@ -51,6 +52,7 @@ LEARNING_ONTOLOGY = LearningOntology.from_seed_content(SEED_TOPICS, SEED_TASKS, 
 
 
 def get_db_connection() -> sqlite3.Connection:
+    """Возвращает подключение к SQLite с доступом к колонкам по именам."""
     connection = sqlite3.connect(DATABASE)
     connection.row_factory = sqlite3.Row
     return connection
@@ -60,6 +62,15 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Добавляет колонку в таблицу, если приложение обновилось, а база уже существует.
+def ensure_column(connection: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    columns = connection.execute(f"PRAGMA table_info({table})").fetchall()
+    existing = {row[1] for row in columns}
+    if column not in existing:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
+# Инициализация схемы БД и миграция недостающих колонок.
 def init_db() -> None:
     with get_db_connection() as connection:
         connection.execute(
@@ -151,7 +162,7 @@ def init_db() -> None:
                 source_concepts TEXT NOT NULL DEFAULT '[]',
                 content_json TEXT NOT NULL,
                 llm_used INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'ready',
+                status TEXT NOT NULL DEFAULT 'draft',
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
@@ -172,6 +183,10 @@ def init_db() -> None:
             )
             """
         )
+        # Мягкая миграция для уже существующей таблицы adaptive_tasks.
+        ensure_column(connection, "adaptive_tasks", "created_by", "created_by INTEGER")
+        ensure_column(connection, "adaptive_tasks", "reviewed_by", "reviewed_by INTEGER")
+        ensure_column(connection, "adaptive_tasks", "assigned_at", "assigned_at TEXT")
         connection.commit()
 
     ensure_admin_user()
@@ -179,6 +194,7 @@ def init_db() -> None:
 
 
 def ensure_admin_user() -> None:
+    """Создаёт учётную запись администратора по умолчанию, если её ещё нет."""
     with get_db_connection() as connection:
         admin = connection.execute(
             "SELECT id FROM users WHERE username = ?", ("admin",)
@@ -192,6 +208,7 @@ def ensure_admin_user() -> None:
 
 
 def seed_content() -> None:
+    """Первичное заполнение тем и заданий из seed-файла."""
     with get_db_connection() as connection:
         count = connection.execute("SELECT COUNT(*) AS total FROM topics").fetchone()
         if count and count["total"] > 0:
@@ -298,16 +315,18 @@ def evaluate_quiz(questions: list[dict], form: dict) -> tuple[int, dict]:
 
 
 def weak_concepts(area_stats: list[dict], threshold: float = 0.7) -> list[str]:
+    """Возвращает концепты, по которым точность ниже заданного порога."""
     return [item["area"] for item in area_stats if item["accuracy"] < threshold]
 
 
+# Последние адаптивные наборы, которые уже назначены студенту или завершены им.
 def recent_adaptive_tasks(user_id: int, limit: int = 5) -> list[sqlite3.Row]:
     with get_db_connection() as connection:
         return connection.execute(
             """
             SELECT id, title, description, status, llm_used, created_at
             FROM adaptive_tasks
-            WHERE user_id = ?
+            WHERE user_id = ? AND status IN ('assigned', 'completed')
             ORDER BY created_at DESC
             LIMIT ?
             """,
@@ -316,6 +335,7 @@ def recent_adaptive_tasks(user_id: int, limit: int = 5) -> list[sqlite3.Row]:
 
 
 def wrong_question_examples(user_id: int, concepts: list[str], limit: int = 8) -> list[dict]:
+    """Собирает примеры ошибок студента для таргетированной генерации заданий."""
     concept_set = set(concepts)
     examples: list[dict] = []
     with get_db_connection() as connection:
@@ -363,6 +383,7 @@ def wrong_question_examples(user_id: int, concepts: list[str], limit: int = 8) -
 
 
 def question_bank_for_concepts(concepts: list[str], limit: int = 12) -> list[dict]:
+    """Формирует банк валидных вопросов по выбранным концептам из существующего курса."""
     concept_set = set(concepts)
     collected: list[dict] = []
     with get_db_connection() as connection:
@@ -399,6 +420,7 @@ def question_bank_for_concepts(concepts: list[str], limit: int = 12) -> list[dic
 
 
 def llm_generate_adaptive_questions(concepts: list[str], examples: list[dict]) -> list[dict] | None:
+    """Пробует сгенерировать адаптивные вопросы через внешнюю LLM-модель."""
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return None
@@ -456,6 +478,7 @@ def llm_generate_adaptive_questions(concepts: list[str], examples: list[dict]) -
 
 
 def fallback_adaptive_questions(concepts: list[str], examples: list[dict]) -> list[dict]:
+    """Локальный генератор на случай, если LLM недоступна или вернула некорректный ответ."""
     questions: list[dict] = []
     pool = examples[:5] if examples else []
     for item in pool:
@@ -492,6 +515,7 @@ def fallback_adaptive_questions(concepts: list[str], examples: list[dict]) -> li
 
 
 def normalize_generated_questions(raw_questions: list[dict], concepts: list[str]) -> list[dict]:
+    """Нормализует и валидирует вопросы перед сохранением в базу."""
     normalized: list[dict] = []
     concept_default = concepts[0] if concepts else "Общее"
     for question in raw_questions:
@@ -522,6 +546,7 @@ def normalize_generated_questions(raw_questions: list[dict], concepts: list[str]
 
 
 def generate_adaptive_questions(user_id: int, concepts: list[str]) -> tuple[list[dict], bool]:
+    """Генерирует адаптивный набор: сначала LLM, затем fallback-путь."""
     examples = wrong_question_examples(user_id, concepts)
     llm_questions = llm_generate_adaptive_questions(concepts, examples)
     if llm_questions:
@@ -533,6 +558,7 @@ def generate_adaptive_questions(user_id: int, concepts: list[str]) -> tuple[list
 
 
 def latest_attempt_concepts(user_id: int, limit: int = 3) -> list[str]:
+    """Извлекает предметные концепты из последних попыток студента."""
     with get_db_connection() as connection:
         rows = connection.execute(
             """
@@ -561,6 +587,21 @@ def latest_attempt_concepts(user_id: int, limit: int = 3) -> list[str]:
             if len(concepts) >= limit:
                 return concepts
     return concepts
+
+# Черновики адаптивных наборов для модерации преподавателем.
+def adaptive_drafts_for_user(user_id: int, limit: int = 10) -> list[sqlite3.Row]:
+    with get_db_connection() as connection:
+        return connection.execute(
+            """
+            SELECT id, title, status, llm_used, created_at
+            FROM adaptive_tasks
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+
 
 
 def get_monitoring_data(user_id: int) -> dict:
@@ -741,6 +782,7 @@ def generate_comment_draft(
 
 
 def support_report_for_user(user_id: int) -> dict:
+    """Собирает единый аналитический отчёт для поддержки студента."""
     monitoring = get_monitoring_data(user_id)
     area_stats = get_area_performance(user_id)
     risk_level, reasons = evaluate_risk(monitoring)
@@ -893,6 +935,9 @@ def task_detail(task_id: int):
     questions = parse_questions(task)
 
     if request.method == "POST":
+        if is_owner and adaptive_task["status"] not in {"assigned", "completed"}:
+            flash("Набор нельзя проходить до назначения преподавателем.")
+            return redirect(url_for("support"))
         score, stored_answers = evaluate_quiz(questions, request.form)
         with get_db_connection() as connection:
             connection.execute(
@@ -945,6 +990,7 @@ def support():
     )
 
 
+# Студент может запросить адаптивный набор, но назначает его преподаватель после проверки.
 @app.route("/adaptive/generate", methods=["POST"])
 def adaptive_generate():
     user = current_user()
@@ -954,9 +1000,7 @@ def adaptive_generate():
 
     report = support_report_for_user(user["id"])
     concepts = [concept for concept in report["weak_concepts"] if concept != "Общее"]
-    target_concepts = concepts[:3]
-    if not target_concepts:
-        target_concepts = latest_attempt_concepts(user["id"])
+    target_concepts = concepts[:3] or latest_attempt_concepts(user["id"])
     if not target_concepts:
         flash(
             "Пока недостаточно предметных данных для адаптивного набора. "
@@ -977,17 +1021,18 @@ def adaptive_generate():
             """
             INSERT INTO adaptive_tasks (
                 user_id, title, description, source_concepts, content_json,
-                llm_used, status, created_at
+                llm_used, status, created_by, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, 'ready', ?)
+            VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)
             """,
             (
                 user["id"],
                 f"Адаптивная практика: {', '.join(target_concepts)}",
-                "Набор сформирован на основе слабых мест и последних ошибок.",
+                "Черновик набора сформирован автоматически и ждёт проверки преподавателя.",
                 json.dumps(target_concepts, ensure_ascii=False),
                 json.dumps({"questions": questions}, ensure_ascii=False),
                 1 if llm_used else 0,
+                user["id"],
                 now_iso(),
             ),
         )
@@ -997,10 +1042,15 @@ def adaptive_generate():
     log_activity(
         user["id"],
         "generate_adaptive_task",
-        {"adaptive_task_id": adaptive_task_id, "concepts": target_concepts, "llm_used": llm_used},
+        {
+            "adaptive_task_id": adaptive_task_id,
+            "concepts": target_concepts,
+            "llm_used": llm_used,
+            "status": "draft",
+        },
     )
-    flash("Адаптивный набор готов. Пройдите его для проверки прогресса.")
-    return redirect(url_for("adaptive_task_detail", adaptive_task_id=adaptive_task_id))
+    flash("Черновик адаптивного набора отправлен преподавателю на проверку.")
+    return redirect(url_for("support"))
 
 
 @app.route("/adaptive/tasks/<int:adaptive_task_id>", methods=["GET", "POST"])
@@ -1013,14 +1063,24 @@ def adaptive_task_detail(adaptive_task_id: int):
     with get_db_connection() as connection:
         adaptive_task = connection.execute(
             """
-            SELECT id, user_id, title, description, source_concepts, content_json, llm_used, created_at
+            SELECT id, user_id, title, description, source_concepts, content_json, llm_used, status, created_at
             FROM adaptive_tasks
             WHERE id = ?
             """,
             (adaptive_task_id,),
         ).fetchone()
-    if adaptive_task is None or adaptive_task["user_id"] != user["id"]:
+    if adaptive_task is None:
         flash("Адаптивное задание не найдено.")
+        return redirect(url_for("support"))
+
+    is_owner = adaptive_task["user_id"] == user["id"]
+    is_admin = bool(user["is_admin"])
+    if not is_owner and not is_admin:
+        flash("Недостаточно прав для просмотра адаптивного задания.")
+        return redirect(url_for("support"))
+
+    if is_owner and adaptive_task["status"] == "draft":
+        flash("Этот набор ещё не назначен преподавателем.")
         return redirect(url_for("support"))
 
     try:
@@ -1034,6 +1094,9 @@ def adaptive_task_detail(adaptive_task_id: int):
         source_concepts = []
 
     if request.method == "POST":
+        if is_owner and adaptive_task["status"] not in {"assigned", "completed"}:
+            flash("Набор нельзя проходить до назначения преподавателем.")
+            return redirect(url_for("support"))
         score, stored_answers = evaluate_quiz(questions, request.form)
         with get_db_connection() as connection:
             connection.execute(
@@ -1282,7 +1345,164 @@ def admin_support_detail(user_id: int):
         selected_user=user_row,
         report=report,
         comment_draft=comment_draft,
+        adaptive_drafts=adaptive_drafts_for_user(user_id),
     )
+
+
+# Преподаватель запускает генерацию черновика для выбранного студента.
+@app.route("/admin/support/users/<int:user_id>/adaptive/generate", methods=["POST"])
+def admin_generate_adaptive_for_user(user_id: int):
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+    if not user["is_admin"]:
+        flash("Недостаточно прав для генерации адаптивного набора.")
+        return redirect(url_for("index"))
+
+    report = support_report_for_user(user_id)
+    concepts = [concept for concept in report["weak_concepts"] if concept != "Общее"]
+    target_concepts = concepts[:3] or latest_attempt_concepts(user_id)
+    if not target_concepts:
+        flash("Недостаточно данных для генерации черновика.")
+        return redirect(url_for("admin_support_detail", user_id=user_id))
+
+    questions, llm_used = generate_adaptive_questions(user_id, target_concepts)
+    if not questions:
+        flash("Не удалось сформировать качественный черновик набора.")
+        return redirect(url_for("admin_support_detail", user_id=user_id))
+
+    with get_db_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO adaptive_tasks (
+                user_id, title, description, source_concepts, content_json,
+                llm_used, status, created_by, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+            """,
+            (
+                user_id,
+                f"Адаптивная практика: {', '.join(target_concepts)}",
+                "Черновик сформирован автоматически. Проверьте и назначьте студенту.",
+                json.dumps(target_concepts, ensure_ascii=False),
+                json.dumps({"questions": questions}, ensure_ascii=False),
+                1 if llm_used else 0,
+                user["id"],
+                now_iso(),
+            ),
+        )
+        connection.commit()
+    flash("Черновик адаптивного набора создан.")
+    return redirect(url_for("admin_support_detail", user_id=user_id))
+
+
+# Страница модерации: преподаватель проверяет вопросы и назначает набор студенту.
+@app.route("/admin/adaptive/<int:adaptive_task_id>/review", methods=["GET", "POST"])
+def admin_review_adaptive_task(adaptive_task_id: int):
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+    if not user["is_admin"]:
+        flash("Недостаточно прав для проверки адаптивных наборов.")
+        return redirect(url_for("index"))
+
+    with get_db_connection() as connection:
+        adaptive_task = connection.execute(
+            """
+            SELECT adaptive_tasks.*, users.username
+            FROM adaptive_tasks
+            JOIN users ON users.id = adaptive_tasks.user_id
+            WHERE adaptive_tasks.id = ?
+            """,
+            (adaptive_task_id,),
+        ).fetchone()
+    if adaptive_task is None:
+        flash("Адаптивный набор не найден.")
+        return redirect(url_for("admin_support"))
+
+    try:
+        payload = json.loads(adaptive_task["content_json"])
+    except json.JSONDecodeError:
+        payload = {"questions": []}
+
+    if request.method == "POST":
+        action = request.form.get("action", "save")
+        questions_raw = request.form.get("questions_json", "")
+        try:
+            questions = json.loads(questions_raw)
+            questions = normalize_generated_questions(questions, [])
+        except json.JSONDecodeError:
+            questions = []
+        if not questions:
+            flash("Сохранение невозможно: проверьте JSON вопросов.")
+            return render_template(
+                "admin_adaptive_review.html",
+                adaptive_task=adaptive_task,
+                questions_json=questions_raw,
+                questions=payload.get("questions", []),
+            )
+
+        new_status = "draft" if action == "save" else "assigned"
+        assigned_at = now_iso() if action == "assign" else adaptive_task["assigned_at"]
+        with get_db_connection() as connection:
+            connection.execute(
+                """
+                UPDATE adaptive_tasks
+                SET content_json = ?, status = ?, reviewed_by = ?, assigned_at = ?
+                WHERE id = ?
+                """,
+                (
+                    json.dumps({"questions": questions}, ensure_ascii=False),
+                    new_status,
+                    user["id"],
+                    assigned_at,
+                    adaptive_task_id,
+                ),
+            )
+            connection.commit()
+
+        if action == "assign":
+            flash("Набор назначен студенту.")
+        else:
+            flash("Черновик сохранён.")
+        return redirect(url_for("admin_review_adaptive_task", adaptive_task_id=adaptive_task_id))
+
+    return render_template(
+        "admin_adaptive_review.html",
+        adaptive_task=adaptive_task,
+        questions=payload.get("questions", []),
+        questions_json=json.dumps(payload.get("questions", []), ensure_ascii=False, indent=2),
+    )
+
+
+@app.route("/admin/adaptive/<int:adaptive_task_id>/delete", methods=["POST"])
+def admin_delete_adaptive_task(adaptive_task_id: int):
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+    if not user["is_admin"]:
+        flash("Недостаточно прав для удаления адаптивного набора.")
+        return redirect(url_for("index"))
+
+    with get_db_connection() as connection:
+        row = connection.execute(
+            "SELECT id, user_id FROM adaptive_tasks WHERE id = ?",
+            (adaptive_task_id,),
+        ).fetchone()
+        if row is None:
+            flash("Набор уже удалён.")
+            return redirect(url_for("admin_support"))
+        connection.execute(
+            "DELETE FROM adaptive_attempts WHERE adaptive_task_id = ?",
+            (adaptive_task_id,),
+        )
+        connection.execute("DELETE FROM adaptive_tasks WHERE id = ?", (adaptive_task_id,))
+        connection.commit()
+    flash("Адаптивный набор удалён.")
+    return redirect(url_for("admin_support_detail", user_id=row["user_id"]))
 
 
 @app.route("/teacher/topics")
@@ -1332,6 +1552,113 @@ def teacher_new_topic():
         flash("Тема добавлена.")
         return redirect(url_for("teacher_topics"))
     return render_template("teacher_topic_form.html")
+
+
+@app.route("/admin/users/<int:user_id>/delete", methods=["POST"])
+def admin_delete_user(user_id: int):
+    """Удаление пользователя и всех связанных результатов."""
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+    if not user["is_admin"]:
+        flash("Недостаточно прав для удаления пользователей.")
+        return redirect(url_for("index"))
+    if user_id == user["id"]:
+        flash("Нельзя удалить текущего администратора.")
+        return redirect(url_for("admin_users"))
+
+    with get_db_connection() as connection:
+        target = connection.execute(
+            "SELECT id, username FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if target is None:
+            flash("Пользователь не найден.")
+            return redirect(url_for("admin_users"))
+        is_admin_target = connection.execute(
+            "SELECT is_admin FROM users WHERE id = ?", (user_id,)
+        ).fetchone()["is_admin"]
+        if is_admin_target:
+            flash("Удаление администратора запрещено.")
+            return redirect(url_for("admin_users"))
+        connection.execute("DELETE FROM task_attempts WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM adaptive_attempts WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM adaptive_tasks WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM activity_logs WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        connection.commit()
+    flash(f"Пользователь {target['username']} удалён.")
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/users/<int:user_id>/results/attempts/<int:result_id>/delete", methods=["POST"])
+def admin_delete_attempt(user_id: int, result_id: int):
+    """Удаление отдельной попытки прохождения задания."""
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+    if not user["is_admin"]:
+        flash("Недостаточно прав для удаления результатов.")
+        return redirect(url_for("index"))
+    with get_db_connection() as connection:
+        connection.execute(
+            "DELETE FROM task_attempts WHERE id = ? AND user_id = ?",
+            (result_id, user_id),
+        )
+        connection.commit()
+    flash("Попытка удалена.")
+    return redirect(url_for("admin_user_results", user_id=user_id))
+
+
+@app.route("/admin/users/<int:user_id>/results/delete_all", methods=["POST"])
+def admin_delete_all_attempts(user_id: int):
+    """Удаление всех результатов студента."""
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+    if not user["is_admin"]:
+        flash("Недостаточно прав для удаления результатов.")
+        return redirect(url_for("index"))
+    with get_db_connection() as connection:
+        connection.execute("DELETE FROM task_attempts WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM adaptive_attempts WHERE user_id = ?", (user_id,))
+        connection.commit()
+    flash("Все результаты пользователя удалены.")
+    return redirect(url_for("admin_user_results", user_id=user_id))
+
+
+@app.route("/teacher/topics/<int:topic_id>/delete", methods=["POST"])
+def teacher_delete_topic(topic_id: int):
+    """Удаление темы и связанных заданий/попыток."""
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+    if not user["is_admin"]:
+        flash("Недостаточно прав для удаления тем.")
+        return redirect(url_for("index"))
+
+    with get_db_connection() as connection:
+        task_rows = connection.execute(
+            "SELECT id FROM tasks WHERE topic_id = ?", (topic_id,)
+        ).fetchall()
+        task_ids = [row["id"] for row in task_rows]
+        if task_ids:
+            placeholders = ",".join(["?"] * len(task_ids))
+            connection.execute(
+                f"DELETE FROM task_attempts WHERE task_id IN ({placeholders})",
+                task_ids,
+            )
+            connection.execute(
+                f"DELETE FROM tasks WHERE id IN ({placeholders})",
+                task_ids,
+            )
+        connection.execute("DELETE FROM topics WHERE id = ?", (topic_id,))
+        connection.commit()
+    flash("Тема и связанные задания удалены.")
+    return redirect(url_for("teacher_topics"))
 
 
 @app.route("/teacher/topics/<int:topic_id>/tasks/new", methods=["GET", "POST"])

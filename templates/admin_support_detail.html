@@ -40,6 +40,27 @@
       <p>Пока нет данных по заданиям.</p>
     {% endif %}
 
+
+    <h3>Адаптивные наборы</h3>
+    <form method="post" action="{{ url_for('admin_generate_adaptive_for_user', user_id=selected_user.id) }}">
+      <button type="submit">Сгенерировать черновик адаптивного набора</button>
+    </form>
+    {% if adaptive_drafts %}
+      <ul>
+        {% for draft in adaptive_drafts %}
+          <li>
+            {{ draft.created_at }} — {{ draft.title }} ({{ draft.status }})
+            <a href="{{ url_for('admin_review_adaptive_task', adaptive_task_id=draft.id) }}">Проверить/назначить</a>
+            <form method="post" action="{{ url_for('admin_delete_adaptive_task', adaptive_task_id=draft.id) }}" style="display:inline">
+              <button type="submit">Удалить</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>Адаптивные наборы для студента ещё не создавались.</p>
+    {% endif %}
+
     <h3>Рекомендации</h3>
     <ul>
       {% for item in report.recommendations %}

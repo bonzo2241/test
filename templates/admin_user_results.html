@@ -21,6 +21,9 @@
               <td>{{ attempt.score }} / {{ attempt.total }}</td>
               <td>
                 <a class="button secondary" href="{{ url_for('admin_attempt_detail', user_id=selected_user.id, result_id=attempt.id) }}">Открыть</a>
+                <form method="post" action="{{ url_for('admin_delete_attempt', user_id=selected_user.id, result_id=attempt.id) }}">
+                  <button type="submit">Удалить</button>
+                </form>
               </td>
             </tr>
           {% endfor %}
@@ -29,6 +32,9 @@
     {% else %}
       <p>Попыток ещё нет.</p>
     {% endif %}
+    <form method="post" action="{{ url_for('admin_delete_all_attempts', user_id=selected_user.id) }}">
+      <button type="submit">Удалить все результаты</button>
+    </form>
     <a class="button" href="{{ url_for('admin_user_profile', user_id=selected_user.id) }}">Назад</a>
   </div>
 {% endblock %}

@@ -8,6 +8,12 @@
     <p><strong>Последняя попытка:</strong> {{ attempts_stats.last_attempt or "нет" }}</p>
     <div class="actions">
       <a class="button secondary" href="{{ url_for('admin_user_results', user_id=selected_user.id) }}">Перейти к результатам</a>
+      <form method="post" action="{{ url_for('admin_delete_all_attempts', user_id=selected_user.id) }}">
+        <button type="submit">Удалить все результаты</button>
+      </form>
+      <form method="post" action="{{ url_for('admin_delete_user', user_id=selected_user.id) }}">
+        <button type="submit">Удалить пользователя</button>
+      </form>
       <a class="button" href="{{ url_for('admin_users') }}">Назад к пользователям</a>
     </div>
   </div>
