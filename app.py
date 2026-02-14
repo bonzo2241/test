@@ -419,21 +419,28 @@ def question_bank_for_concepts(concepts: list[str], limit: int = 12) -> list[dic
     return collected
 
 
+# Тексты уже существующих вопросов, чтобы LLM не дублировала их дословно.
+def existing_question_texts_for_concepts(concepts: list[str], limit: int = 40) -> list[str]:
+    return [item["question"] for item in question_bank_for_concepts(concepts, limit=limit)]
+
+
 def llm_generate_adaptive_questions(concepts: list[str], examples: list[dict]) -> list[dict] | None:
     """Пробует сгенерировать адаптивные вопросы через внешнюю LLM-модель."""
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return None
 
+    existing_questions = existing_question_texts_for_concepts(concepts)
     payload = {
         "model": os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
-        "temperature": 0.3,
+        "temperature": 0.5,
         "messages": [
             {
                 "role": "system",
                 "content": (
-                    "Сгенерируй адаптивные учебные задания в формате JSON. "
-                    "Нужен только JSON-массив объектов с полями question, options, answer, concept."
+                    "Ты создаёшь НОВЫЕ адаптивные тестовые вопросы. "
+                    "Не повторяй формулировки из existing_questions. "
+                    "Верни только JSON-массив объектов question/options/answer/concept."
                 ),
             },
             {
@@ -442,11 +449,13 @@ def llm_generate_adaptive_questions(concepts: list[str], examples: list[dict]) -
                     {
                         "concepts": concepts,
                         "wrong_examples": examples,
+                        "existing_questions": existing_questions,
                         "constraints": {
-                            "count": 5,
+                            "count": 8,
                             "single_correct_answer": True,
                             "options_count": 4,
                             "language": "ru",
+                            "must_be_new": True,
                         },
                     },
                     ensure_ascii=False,
@@ -478,37 +487,49 @@ def llm_generate_adaptive_questions(concepts: list[str], examples: list[dict]) -
 
 
 def fallback_adaptive_questions(concepts: list[str], examples: list[dict]) -> list[dict]:
-    """Локальный генератор на случай, если LLM недоступна или вернула некорректный ответ."""
+    """Локальный генератор, создающий новые формулировки без копирования оригинальных вопросов."""
     questions: list[dict] = []
-    pool = examples[:5] if examples else []
+    pool = examples[:8] if examples else []
+
     for item in pool:
+        concept = item["concept"]
+        answer = item["correct"]
+        wrong = item["selected"]
         distractors = [
-            item["selected"],
-            "Вариант A",
-            "Вариант B",
-            item["correct"],
+            wrong,
+            f"Похожие данные по теме {concept}",
+            f"Неверная интерпретация по теме {concept}",
+            answer,
         ]
         random.shuffle(distractors)
         questions.append(
             {
-                "question": f"Выберите корректный ответ: {item['question']}",
-                "options": list(dict.fromkeys(distractors))[:4],
-                "answer": item["correct"],
-                "concept": item["concept"],
+                "question": (
+                    f"Адаптивный вопрос по разделу «{concept}»: "
+                    f"выберите корректный вариант по контексту задания «{item['question']}»."
+                ),
+                "options": list(dict.fromkeys([str(x) for x in distractors]))[:4],
+                "answer": answer,
+                "concept": concept,
             }
         )
 
     if not questions:
-        bank = question_bank_for_concepts(concepts)
-        for item in bank[:5]:
-            options = list(item["options"])
-            random.shuffle(options)
+        for concept in concepts[:5]:
+            right = f"Верное утверждение по разделу {concept}"
+            variants = [
+                right,
+                f"Неверное утверждение 1 по разделу {concept}",
+                f"Неверное утверждение 2 по разделу {concept}",
+                f"Неверное утверждение 3 по разделу {concept}",
+            ]
+            random.shuffle(variants)
             questions.append(
                 {
-                    "question": item["question"],
-                    "options": options,
-                    "answer": item["answer"],
-                    "concept": item["concept"],
+                    "question": f"Новый контрольный вопрос по разделу «{concept}» (вариант адаптации).",
+                    "options": variants,
+                    "answer": right,
+                    "concept": concept,
                 }
             )
     return questions
@@ -551,7 +572,7 @@ def generate_adaptive_questions(user_id: int, concepts: list[str]) -> tuple[list
     llm_questions = llm_generate_adaptive_questions(concepts, examples)
     if llm_questions:
         normalized = normalize_generated_questions(llm_questions, concepts)
-        if normalized:
+        if len(normalized) >= 5:
             return normalized, True
     fallback = normalize_generated_questions(fallback_adaptive_questions(concepts, examples), concepts)
     return fallback, False
