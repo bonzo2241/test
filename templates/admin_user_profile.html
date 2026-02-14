@@ -1,0 +1,20 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Профиль пользователя: {{ selected_user.username }}</h2>
+    <p><strong>Роль:</strong> {{ "администратор" if selected_user.is_admin else "студент" }}</p>
+    <p><strong>Количество попыток:</strong> {{ attempts_stats.attempts }}</p>
+    <p><strong>Последняя попытка:</strong> {{ attempts_stats.last_attempt or "нет" }}</p>
+    <div class="actions">
+      <a class="button secondary" href="{{ url_for('admin_user_results', user_id=selected_user.id) }}">Перейти к результатам</a>
+      <form method="post" action="{{ url_for('admin_delete_all_attempts', user_id=selected_user.id) }}">
+        <button type="submit">Удалить все результаты</button>
+      </form>
+      <form method="post" action="{{ url_for('admin_delete_user', user_id=selected_user.id) }}">
+        <button type="submit">Удалить пользователя</button>
+      </form>
+      <a class="button" href="{{ url_for('admin_users') }}">Назад к пользователям</a>
+    </div>
+  </div>
+{% endblock %}
