@@ -935,9 +935,6 @@ def task_detail(task_id: int):
     questions = parse_questions(task)
 
     if request.method == "POST":
-        if is_owner and adaptive_task["status"] not in {"assigned", "completed"}:
-            flash("Набор нельзя проходить до назначения преподавателем.")
-            return redirect(url_for("support"))
         score, stored_answers = evaluate_quiz(questions, request.form)
         with get_db_connection() as connection:
             connection.execute(
@@ -1094,9 +1091,6 @@ def adaptive_task_detail(adaptive_task_id: int):
         source_concepts = []
 
     if request.method == "POST":
-        if is_owner and adaptive_task["status"] not in {"assigned", "completed"}:
-            flash("Набор нельзя проходить до назначения преподавателем.")
-            return redirect(url_for("support"))
         score, stored_answers = evaluate_quiz(questions, request.form)
         with get_db_connection() as connection:
             connection.execute(
