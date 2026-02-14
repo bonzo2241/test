@@ -1,0 +1,9 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Результат задания: {{ task.title }}</h2>
+    <p>Ваш результат: {{ score }} из {{ total }}.</p>
+    <a class="button" href="{{ url_for('topics') }}">Вернуться к темам</a>
+  </div>
+{% endblock %}
