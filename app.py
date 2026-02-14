@@ -362,6 +362,42 @@ def wrong_question_examples(user_id: int, concepts: list[str], limit: int = 8) -
     return examples
 
 
+def question_bank_for_concepts(concepts: list[str], limit: int = 12) -> list[dict]:
+    concept_set = set(concepts)
+    collected: list[dict] = []
+    with get_db_connection() as connection:
+        tasks = connection.execute(
+            "SELECT content_json FROM tasks ORDER BY id"
+        ).fetchall()
+
+    for task in tasks:
+        if len(collected) >= limit:
+            break
+        try:
+            questions = json.loads(task["content_json"]).get("questions", [])
+        except json.JSONDecodeError:
+            questions = []
+        for question in questions:
+            concept = LEARNING_ONTOLOGY.concept_for_question(question, "Общее")
+            if concept_set and concept not in concept_set:
+                continue
+            options = question.get("options", [])
+            answer = question.get("answer")
+            if not isinstance(options, list) or answer not in options:
+                continue
+            collected.append(
+                {
+                    "question": question.get("question", ""),
+                    "options": options,
+                    "answer": answer,
+                    "concept": concept,
+                }
+            )
+            if len(collected) >= limit:
+                break
+    return collected
+
+
 def llm_generate_adaptive_questions(concepts: list[str], examples: list[dict]) -> list[dict] | None:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
@@ -440,18 +476,16 @@ def fallback_adaptive_questions(concepts: list[str], examples: list[dict]) -> li
         )
 
     if not questions:
-        for concept in concepts[:3] or ["Общее"]:
+        bank = question_bank_for_concepts(concepts)
+        for item in bank[:5]:
+            options = list(item["options"])
+            random.shuffle(options)
             questions.append(
                 {
-                    "question": f"Контрольный вопрос по разделу «{concept}». Выберите верное утверждение.",
-                    "options": [
-                        f"Корректный факт по теме {concept}",
-                        f"Ошибочный факт 1 по теме {concept}",
-                        f"Ошибочный факт 2 по теме {concept}",
-                        f"Ошибочный факт 3 по теме {concept}",
-                    ],
-                    "answer": f"Корректный факт по теме {concept}",
-                    "concept": concept,
+                    "question": item["question"],
+                    "options": options,
+                    "answer": item["answer"],
+                    "concept": item["concept"],
                 }
             )
     return questions
@@ -496,6 +530,37 @@ def generate_adaptive_questions(user_id: int, concepts: list[str]) -> tuple[list
             return normalized, True
     fallback = normalize_generated_questions(fallback_adaptive_questions(concepts, examples), concepts)
     return fallback, False
+
+
+def latest_attempt_concepts(user_id: int, limit: int = 3) -> list[str]:
+    with get_db_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT tasks.content_json
+            FROM task_attempts
+            JOIN tasks ON tasks.id = task_attempts.task_id
+            WHERE task_attempts.user_id = ?
+            ORDER BY task_attempts.created_at DESC
+            LIMIT 5
+            """,
+            (user_id,),
+        ).fetchall()
+    concepts: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        try:
+            questions = json.loads(row["content_json"]).get("questions", [])
+        except json.JSONDecodeError:
+            questions = []
+        for question in questions:
+            concept = LEARNING_ONTOLOGY.concept_for_question(question, "Общее")
+            if concept == "Общее" or concept in seen:
+                continue
+            seen.add(concept)
+            concepts.append(concept)
+            if len(concepts) >= limit:
+                return concepts
+    return concepts
 
 
 def get_monitoring_data(user_id: int) -> dict:
@@ -888,15 +953,23 @@ def adaptive_generate():
         return redirect(url_for("login"))
 
     report = support_report_for_user(user["id"])
-    concepts = report["weak_concepts"]
-    if not concepts and report["risk_level"] not in {"Зона риска", "Высокий риск"}:
-        flash("Сейчас адаптивный набор не требуется: серьёзных рисков не обнаружено.")
+    concepts = [concept for concept in report["weak_concepts"] if concept != "Общее"]
+    target_concepts = concepts[:3]
+    if not target_concepts:
+        target_concepts = latest_attempt_concepts(user["id"])
+    if not target_concepts:
+        flash(
+            "Пока недостаточно предметных данных для адаптивного набора. "
+            "Сначала выполните хотя бы одно обычное задание по теме."
+        )
         return redirect(url_for("support"))
 
-    target_concepts = concepts[:3] or ["Общее"]
     questions, llm_used = generate_adaptive_questions(user["id"], target_concepts)
     if not questions:
-        flash("Не удалось сгенерировать адаптивные задания. Попробуйте позже.")
+        flash(
+            "Не удалось собрать качественный адаптивный набор по выбранным разделам. "
+            "Попробуйте пройти ещё одно основное задание и повторить."
+        )
         return redirect(url_for("support"))
 
     with get_db_connection() as connection:
