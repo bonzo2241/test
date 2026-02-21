@@ -59,6 +59,21 @@
       </ul>
     {% endif %}
 
+
+    <h3>Персональные материалы для повторения</h3>
+    {% if report.personalized_materials %}
+      <ul>
+        {% for material in report.personalized_materials %}
+          <li>
+            <strong>{{ material.concept }}</strong> (текущее освоение: {{ (material.mastery * 100)|round(0) }}%)<br />
+            <em>{{ material.title }}</em>: {{ material.content }}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>Персональные материалы появятся после первых попыток.</p>
+    {% endif %}
+
     <h3>Рекомендации</h3>
     <ul>
       {% for item in report.recommendations %}

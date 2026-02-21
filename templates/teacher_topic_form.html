@@ -9,8 +9,24 @@
         <input type="text" name="title" required />
       </label>
       <label>
+        Курс
+        <select name="course_id">
+          {% for course in courses %}
+            <option value="{{ course.id }}">{{ course.title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
         Описание темы
         <input type="text" name="description" required />
+      </label>
+      <label>
+        Концепт для адаптации
+        <input type="text" name="concept" />
+      </label>
+      <label>
+        Базовый материал для темы (будет использоваться в персональных рекомендациях)
+        <textarea name="material_content" rows="6"></textarea>
       </label>
       <button type="submit">Сохранить</button>
     </form>

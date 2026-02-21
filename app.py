@@ -110,6 +110,48 @@ def init_db() -> None:
         )
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS courses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT UNIQUE NOT NULL,
+                description TEXT NOT NULL,
+                created_by INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(created_by) REFERENCES users(id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS topic_materials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic_id INTEGER NOT NULL,
+                concept TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                level TEXT NOT NULL DEFAULT 'core',
+                created_by INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(topic_id) REFERENCES topics(id),
+                FOREIGN KEY(created_by) REFERENCES users(id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_concept_mastery (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                concept TEXT NOT NULL,
+                mastery REAL NOT NULL DEFAULT 0.5,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, concept),
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 topic_id INTEGER NOT NULL,
@@ -183,6 +225,7 @@ def init_db() -> None:
             )
             """
         )
+        ensure_column(connection, "topics", "course_id", "course_id INTEGER")
         # Мягкая миграция для уже существующей таблицы adaptive_tasks.
         ensure_column(connection, "adaptive_tasks", "created_by", "created_by INTEGER")
         ensure_column(connection, "adaptive_tasks", "reviewed_by", "reviewed_by INTEGER")
@@ -190,7 +233,9 @@ def init_db() -> None:
         connection.commit()
 
     ensure_admin_user()
+    ensure_default_course()
     seed_content()
+    seed_materials()
 
 
 def ensure_admin_user() -> None:
@@ -207,6 +252,42 @@ def ensure_admin_user() -> None:
             connection.commit()
 
 
+
+
+def ensure_default_course() -> None:
+    """Создаёт базовый курс и привязывает существующие темы к нему."""
+    with get_db_connection() as connection:
+        admin = connection.execute(
+            "SELECT id FROM users WHERE username = ?", ("admin",)
+        ).fetchone()
+        if admin is None:
+            return
+        row = connection.execute(
+            "SELECT id FROM courses WHERE title = ?", ("Базовый курс",)
+        ).fetchone()
+        if row is None:
+            cursor = connection.execute(
+                """
+                INSERT INTO courses (title, description, created_by, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    "Базовый курс",
+                    "Курс по умолчанию для существующих тем. Можно создать собственные курсы.",
+                    admin["id"],
+                    now_iso(),
+                ),
+            )
+            course_id = cursor.lastrowid
+        else:
+            course_id = row["id"]
+        connection.execute(
+            "UPDATE topics SET course_id = ? WHERE course_id IS NULL",
+            (course_id,),
+        )
+        connection.commit()
+
+
 def seed_content() -> None:
     """Первичное заполнение тем и заданий из seed-файла."""
     with get_db_connection() as connection:
@@ -219,13 +300,17 @@ def seed_content() -> None:
         if admin is None:
             return
         now = now_iso()
+        default_course = connection.execute(
+            "SELECT id FROM courses WHERE title = ?", ("Базовый курс",)
+        ).fetchone()
+        default_course_id = default_course["id"] if default_course else None
         for topic in SEED_TOPICS:
             connection.execute(
                 """
-                INSERT INTO topics (title, description, created_by, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO topics (title, description, created_by, created_at, course_id)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (topic["title"], topic["description"], admin["id"], now),
+                (topic["title"], topic["description"], admin["id"], now, default_course_id),
             )
         connection.commit()
         topics = connection.execute("SELECT id, title FROM topics").fetchall()
@@ -251,6 +336,43 @@ def seed_content() -> None:
                     content,
                     admin["id"],
                     now,
+                ),
+            )
+        connection.commit()
+
+
+
+
+def seed_materials() -> None:
+    """Заполняет справочник материалов по концептам на основе seed-данных."""
+    with get_db_connection() as connection:
+        admin = connection.execute(
+            "SELECT id FROM users WHERE username = ?", ("admin",)
+        ).fetchone()
+        if admin is None:
+            return
+        topics = connection.execute("SELECT id, title FROM topics").fetchall()
+        existing = connection.execute("SELECT id FROM topic_materials LIMIT 1").fetchone()
+        if existing:
+            return
+        topic_map = {row["title"]: row["id"] for row in topics}
+        default_topic_id = topics[0]["id"] if topics else None
+        for concept, content in SEED_MATERIALS.items():
+            topic_id = topic_map.get(concept) or default_topic_id
+            if topic_id is None:
+                continue
+            connection.execute(
+                """
+                INSERT INTO topic_materials (topic_id, concept, title, content, level, created_by, created_at)
+                VALUES (?, ?, ?, ?, 'core', ?, ?)
+                """,
+                (
+                    topic_id,
+                    concept,
+                    f"Материал: {concept}",
+                    content,
+                    admin["id"],
+                    now_iso(),
                 ),
             )
         connection.commit()
@@ -726,6 +848,91 @@ def get_area_performance(user_id: int) -> list[dict]:
     return sorted(results, key=lambda item: item["accuracy"])
 
 
+def extract_question_concept(question: dict) -> str:
+    """Извлекает концепт вопроса для адаптивной аналитики."""
+    return LEARNING_ONTOLOGY.concept_for_question(question, "Общее")
+
+
+def update_user_concept_mastery(user_id: int, questions: list[dict], answers: dict[str, str]) -> None:
+    """Обновляет мастерство студента по концептам после попытки (EWMA-обновление)."""
+    concept_stats: dict[str, dict[str, int]] = {}
+    for index, question in enumerate(questions):
+        concept = extract_question_concept(question)
+        concept_stats.setdefault(concept, {"correct": 0, "total": 0})
+        concept_stats[concept]["total"] += 1
+        if answers.get(str(index)) == question.get("answer"):
+            concept_stats[concept]["correct"] += 1
+
+    with get_db_connection() as connection:
+        for concept, stats in concept_stats.items():
+            observed = stats["correct"] / stats["total"] if stats["total"] else 0
+            current = connection.execute(
+                """
+                SELECT id, mastery, attempts FROM user_concept_mastery
+                WHERE user_id = ? AND concept = ?
+                """,
+                (user_id, concept),
+            ).fetchone()
+            if current is None:
+                mastery = 0.4 * observed + 0.6 * 0.5
+                connection.execute(
+                    """
+                    INSERT INTO user_concept_mastery (user_id, concept, mastery, attempts, updated_at)
+                    VALUES (?, ?, ?, 1, ?)
+                    """,
+                    (user_id, concept, mastery, now_iso()),
+                )
+            else:
+                mastery = 0.65 * float(current["mastery"]) + 0.35 * observed
+                connection.execute(
+                    """
+                    UPDATE user_concept_mastery
+                    SET mastery = ?, attempts = attempts + 1, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (mastery, now_iso(), current["id"]),
+                )
+        connection.commit()
+
+
+def personalized_materials(user_id: int, weak_concepts: list[str]) -> list[dict]:
+    """Подбирает персональные материалы по слабым концептам и уровню мастерства."""
+    if not weak_concepts:
+        return []
+    placeholders = ",".join(["?"] * len(weak_concepts))
+    with get_db_connection() as connection:
+        mastery_rows = connection.execute(
+            f"""
+            SELECT concept, mastery
+            FROM user_concept_mastery
+            WHERE user_id = ? AND concept IN ({placeholders})
+            """,
+            [user_id, *weak_concepts],
+        ).fetchall()
+        mat_rows = connection.execute(
+            f"""
+            SELECT concept, title, content, level
+            FROM topic_materials
+            WHERE concept IN ({placeholders})
+            ORDER BY id DESC
+            """,
+            weak_concepts,
+        ).fetchall()
+    mastery_map = {row["concept"]: float(row["mastery"]) for row in mastery_rows}
+    result = []
+    for material in mat_rows:
+        result.append(
+            {
+                "concept": material["concept"],
+                "title": material["title"],
+                "content": material["content"],
+                "level": material["level"],
+                "mastery": mastery_map.get(material["concept"], 0.5),
+            }
+        )
+    return sorted(result, key=lambda item: item["mastery"])[:8]
+
+
 def evaluate_risk(monitoring: dict) -> tuple[str, list[str]]:
     reasons = []
     if monitoring["days_since_last"] is None:
@@ -809,10 +1016,12 @@ def support_report_for_user(user_id: int) -> dict:
     risk_level, reasons = evaluate_risk(monitoring)
     recommendations = build_recommendations(monitoring, area_stats, risk_level)
     plan_tip = optimize_plan(monitoring)
+    weak = weak_concepts(area_stats)
     return {
         "monitoring": monitoring,
         "area_stats": area_stats,
-        "weak_concepts": weak_concepts(area_stats),
+        "weak_concepts": weak,
+        "personalized_materials": personalized_materials(user_id, weak),
         "risk_level": risk_level,
         "risk_reasons": reasons,
         "recommendations": recommendations,
@@ -973,6 +1182,7 @@ def task_detail(task_id: int):
                 ),
             )
             connection.commit()
+        update_user_concept_mastery(user["id"], questions, stored_answers)
         log_activity(user["id"], "submit_task", {"task_id": task_id, "score": score})
         return render_template(
             "task_result.html",
@@ -1133,6 +1343,7 @@ def adaptive_task_detail(adaptive_task_id: int):
                 (adaptive_task_id,),
             )
             connection.commit()
+        update_user_concept_mastery(user["id"], questions, stored_answers)
         log_activity(
             user["id"],
             "submit_adaptive_task",
@@ -1531,9 +1742,149 @@ def teacher_topics():
         return redirect(url_for("index"))
     with get_db_connection() as connection:
         topics_rows = connection.execute(
-            "SELECT id, title, description FROM topics ORDER BY id"
+            """
+            SELECT topics.id, topics.title, topics.description,
+                   COALESCE(courses.title, 'Без курса') AS course_title
+            FROM topics
+            LEFT JOIN courses ON courses.id = topics.course_id
+            ORDER BY topics.id
+            """
         ).fetchall()
-    return render_template("teacher_topics.html", topics=topics_rows)
+        courses = connection.execute(
+            "SELECT id, title, description FROM courses ORDER BY id"
+        ).fetchall()
+    return render_template("teacher_topics.html", topics=topics_rows, courses=courses)
+
+
+@app.route("/teacher/courses/new", methods=["GET", "POST"])
+def teacher_new_course():
+    """Быстрое создание курса и опциональный импорт тем/заданий из JSON."""
+    user = current_user()
+    if user is None:
+        flash("Сначала войдите.")
+        return redirect(url_for("login"))
+    if not user["is_admin"]:
+        flash("Недостаточно прав для работы с курсами.")
+        return redirect(url_for("index"))
+
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        description = request.form.get("description", "").strip()
+        payload_raw = request.form.get("payload_json", "").strip()
+        if not title or not description:
+            flash("Заполните название и описание курса.")
+            return redirect(url_for("teacher_new_course"))
+
+        payload = None
+        if payload_raw:
+            try:
+                payload = json.loads(payload_raw)
+            except json.JSONDecodeError:
+                flash("JSON импорта заполнен с ошибкой.")
+                return redirect(url_for("teacher_new_course"))
+
+        with get_db_connection() as connection:
+            try:
+                course_cursor = connection.execute(
+                    """
+                    INSERT INTO courses (title, description, created_by, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (title, description, user["id"], now_iso()),
+                )
+            except sqlite3.IntegrityError:
+                flash("Курс с таким названием уже существует.")
+                return redirect(url_for("teacher_new_course"))
+
+            course_id = course_cursor.lastrowid
+            if payload and isinstance(payload, dict):
+                for topic in payload.get("topics", []):
+                    topic_title = str(topic.get("title", "")).strip()
+                    topic_desc = str(topic.get("description", "")).strip() or "Описание не задано"
+                    if not topic_title:
+                        continue
+                    topic_cursor = connection.execute(
+                        """
+                        INSERT INTO topics (title, description, created_by, created_at, course_id)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (topic_title, topic_desc, user["id"], now_iso(), course_id),
+                    )
+                    topic_id = topic_cursor.lastrowid
+                    for material in topic.get("materials", []):
+                        connection.execute(
+                            """
+                            INSERT INTO topic_materials (topic_id, concept, title, content, level, created_by, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                topic_id,
+                                str(material.get("concept", topic_title)),
+                                str(material.get("title", f"Материал: {topic_title}")),
+                                str(material.get("content", "")),
+                                str(material.get("level", "core")),
+                                user["id"],
+                                now_iso(),
+                            ),
+                        )
+                    for task in topic.get("tasks", []):
+                        questions = task.get("questions", [])
+                        if not isinstance(questions, list) or not questions:
+                            continue
+                        connection.execute(
+                            """
+                            INSERT INTO tasks (topic_id, title, description, task_type, due_date, content_json, created_by, created_at)
+                            VALUES (?, ?, ?, 'quiz', NULL, ?, ?, ?)
+                            """,
+                            (
+                                topic_id,
+                                str(task.get("title", f"Тест по теме {topic_title}")),
+                                str(task.get("description", "Автоматически импортированное задание")),
+                                json.dumps({"questions": questions}, ensure_ascii=False),
+                                user["id"],
+                                now_iso(),
+                            ),
+                        )
+            connection.commit()
+
+        flash("Курс создан. Можно сразу работать с темами и заданиями.")
+        return redirect(url_for("teacher_topics"))
+
+    example_payload = json.dumps(
+        {
+            "topics": [
+                {
+                    "title": "Новая тема",
+                    "description": "Краткое описание",
+                    "materials": [
+                        {
+                            "concept": "Новая тема",
+                            "title": "Конспект",
+                            "content": "Краткий материал для повтора",
+                            "level": "core",
+                        }
+                    ],
+                    "tasks": [
+                        {
+                            "title": "Входной тест",
+                            "description": "Проверка базового понимания",
+                            "questions": [
+                                {
+                                    "question": "Пример вопроса",
+                                    "options": ["A", "B", "C"],
+                                    "answer": "A",
+                                    "concept": "Новая тема",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    return render_template("teacher_course_form.html", example_payload=example_payload)
 
 
 @app.route("/teacher/topics/new", methods=["GET", "POST"])
@@ -1545,28 +1896,49 @@ def teacher_new_topic():
     if not user["is_admin"]:
         flash("Недостаточно прав для работы с темами.")
         return redirect(url_for("index"))
+    with get_db_connection() as connection:
+        courses = connection.execute("SELECT id, title FROM courses ORDER BY id").fetchall()
     if request.method == "POST":
         title = request.form.get("title", "").strip()
         description = request.form.get("description", "").strip()
+        concept = request.form.get("concept", "").strip() or title
+        material_content = request.form.get("material_content", "").strip()
+        course_id = request.form.get("course_id", type=int) or (courses[0]["id"] if courses else 1)
         if not title or not description:
             flash("Заполните название и описание темы.")
             return redirect(url_for("teacher_new_topic"))
         with get_db_connection() as connection:
             try:
-                connection.execute(
+                cursor = connection.execute(
                     """
-                    INSERT INTO topics (title, description, created_by, created_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO topics (title, description, created_by, created_at, course_id)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (title, description, user["id"], now_iso()),
+                    (title, description, user["id"], now_iso(), course_id),
                 )
+                topic_id = cursor.lastrowid
+                if material_content:
+                    connection.execute(
+                        """
+                        INSERT INTO topic_materials (topic_id, concept, title, content, level, created_by, created_at)
+                        VALUES (?, ?, ?, ?, 'core', ?, ?)
+                        """,
+                        (
+                            topic_id,
+                            concept,
+                            f"Материал: {concept}",
+                            material_content,
+                            user["id"],
+                            now_iso(),
+                        ),
+                    )
                 connection.commit()
             except sqlite3.IntegrityError:
                 flash("Тема с таким названием уже существует.")
                 return redirect(url_for("teacher_new_topic"))
         flash("Тема добавлена.")
         return redirect(url_for("teacher_topics"))
-    return render_template("teacher_topic_form.html")
+    return render_template("teacher_topic_form.html", courses=courses)
 
 
 @app.route("/admin/users/<int:user_id>/delete", methods=["POST"])
@@ -1600,6 +1972,7 @@ def admin_delete_user(user_id: int):
         connection.execute("DELETE FROM adaptive_attempts WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM adaptive_tasks WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM activity_logs WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM user_concept_mastery WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
         connection.commit()
     flash(f"Пользователь {target['username']} удалён.")
@@ -1670,6 +2043,7 @@ def teacher_delete_topic(topic_id: int):
                 f"DELETE FROM tasks WHERE id IN ({placeholders})",
                 task_ids,
             )
+        connection.execute("DELETE FROM topic_materials WHERE topic_id = ?", (topic_id,))
         connection.execute("DELETE FROM topics WHERE id = ?", (topic_id,))
         connection.commit()
     flash("Тема и связанные задания удалены.")
