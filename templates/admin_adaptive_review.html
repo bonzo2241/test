@@ -7,6 +7,7 @@
     <p><strong>Название:</strong> {{ adaptive_task.title }}</p>
     <p><strong>Статус:</strong> {{ adaptive_task.status }}</p>
     <p><strong>Источник:</strong> {{ "LLM" if adaptive_task.llm_used else "встроенный адаптер" }}</p>
+    <p><strong>Диагностика генерации:</strong> {{ generation_note or adaptive_task.generation_note or "—" }}</p>
 
     <h3>Предпросмотр вопросов</h3>
     {% if questions %}

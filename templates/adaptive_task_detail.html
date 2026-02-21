@@ -6,6 +6,7 @@
     <p>{{ adaptive_task.description }}</p>
     <p class="meta">Целевые разделы: {{ source_concepts | join(', ') }}</p>
     <p class="meta">Источник генерации: {{ "LLM" if adaptive_task.llm_used else "встроенный адаптер" }}</p>
+    <p class="meta">Диагностика: {{ adaptive_task.generation_note or "—" }}</p>
     <form method="post">
       {% for question in questions %}
         {% set question_index = loop.index0 %}

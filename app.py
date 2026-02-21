@@ -205,6 +205,7 @@ def init_db() -> None:
                 content_json TEXT NOT NULL,
                 llm_used INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'draft',
+                generation_note TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
@@ -230,6 +231,7 @@ def init_db() -> None:
         ensure_column(connection, "adaptive_tasks", "created_by", "created_by INTEGER")
         ensure_column(connection, "adaptive_tasks", "reviewed_by", "reviewed_by INTEGER")
         ensure_column(connection, "adaptive_tasks", "assigned_at", "assigned_at TEXT")
+        ensure_column(connection, "adaptive_tasks", "generation_note", "generation_note TEXT NOT NULL DEFAULT ''")
         connection.commit()
 
     ensure_admin_user()
@@ -546,11 +548,11 @@ def existing_question_texts_for_concepts(concepts: list[str], limit: int = 40) -
     return [item["question"] for item in question_bank_for_concepts(concepts, limit=limit)]
 
 
-def llm_generate_adaptive_questions(concepts: list[str], examples: list[dict]) -> list[dict] | None:
+def llm_generate_adaptive_questions(concepts: list[str], examples: list[dict]) -> tuple[list[dict] | None, str]:
     """Пробует сгенерировать адаптивные вопросы через внешнюю LLM-модель."""
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        return None
+        return None, "OPENAI_API_KEY не задан"
 
     existing_questions = existing_question_texts_for_concepts(concepts)
     payload = {
@@ -597,15 +599,17 @@ def llm_generate_adaptive_questions(concepts: list[str], examples: list[dict]) -
     try:
         with urlrequest.urlopen(req, timeout=20) as response:
             result = json.loads(response.read().decode("utf-8"))
-    except (error.URLError, TimeoutError, json.JSONDecodeError):
-        return None
+    except (error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        return None, f"Ошибка запроса к LLM API: {exc}"
 
     try:
         content = result["choices"][0]["message"]["content"]
         generated = json.loads(content)
     except (KeyError, IndexError, TypeError, json.JSONDecodeError):
-        return None
-    return generated if isinstance(generated, list) else None
+        return None, "LLM вернула ответ в неподдерживаемом формате"
+    if not isinstance(generated, list):
+        return None, "LLM вернула не список вопросов"
+    return generated, "ok"
 
 
 def fallback_adaptive_questions(concepts: list[str], examples: list[dict]) -> list[dict]:
@@ -688,16 +692,23 @@ def normalize_generated_questions(raw_questions: list[dict], concepts: list[str]
     return normalized
 
 
-def generate_adaptive_questions(user_id: int, concepts: list[str]) -> tuple[list[dict], bool]:
+def generate_adaptive_questions(user_id: int, concepts: list[str]) -> tuple[list[dict], bool, str]:
     """Генерирует адаптивный набор: сначала LLM, затем fallback-путь."""
     examples = wrong_question_examples(user_id, concepts)
-    llm_questions = llm_generate_adaptive_questions(concepts, examples)
+    llm_questions, llm_reason = llm_generate_adaptive_questions(concepts, examples)
     if llm_questions:
         normalized = normalize_generated_questions(llm_questions, concepts)
         if len(normalized) >= 5:
-            return normalized, True
-    fallback = normalize_generated_questions(fallback_adaptive_questions(concepts, examples), concepts)
-    return fallback, False
+            return normalized, True, "LLM генерация успешна"
+        fallback_reason = f"LLM дала слишком мало валидных вопросов после нормализации ({len(normalized)} < 5)"
+    else:
+        fallback_reason = llm_reason
+
+    fallback_raw = fallback_adaptive_questions(concepts, examples)
+    fallback = normalize_generated_questions(fallback_raw, concepts)
+    examples_info = "есть примеры ошибок" if examples else "нет примеров ошибок"
+    note = f"Использован fallback: {fallback_reason}. Контекст: {examples_info}."
+    return fallback, False, note
 
 
 def latest_attempt_concepts(user_id: int, limit: int = 3) -> list[str]:
@@ -1236,7 +1247,7 @@ def adaptive_generate():
         )
         return redirect(url_for("support"))
 
-    questions, llm_used = generate_adaptive_questions(user["id"], target_concepts)
+    questions, llm_used, generation_note = generate_adaptive_questions(user["id"], target_concepts)
     if not questions:
         flash(
             "Не удалось собрать качественный адаптивный набор по выбранным разделам. "
@@ -1249,9 +1260,9 @@ def adaptive_generate():
             """
             INSERT INTO adaptive_tasks (
                 user_id, title, description, source_concepts, content_json,
-                llm_used, status, created_by, created_at
+                llm_used, status, generation_note, created_by, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)
             """,
             (
                 user["id"],
@@ -1260,6 +1271,7 @@ def adaptive_generate():
                 json.dumps(target_concepts, ensure_ascii=False),
                 json.dumps({"questions": questions}, ensure_ascii=False),
                 1 if llm_used else 0,
+                generation_note,
                 user["id"],
                 now_iso(),
             ),
@@ -1275,6 +1287,7 @@ def adaptive_generate():
             "concepts": target_concepts,
             "llm_used": llm_used,
             "status": "draft",
+            "generation_note": generation_note,
         },
     )
     flash("Черновик адаптивного набора отправлен преподавателю на проверку.")
@@ -1291,7 +1304,7 @@ def adaptive_task_detail(adaptive_task_id: int):
     with get_db_connection() as connection:
         adaptive_task = connection.execute(
             """
-            SELECT id, user_id, title, description, source_concepts, content_json, llm_used, status, created_at
+            SELECT id, user_id, title, description, source_concepts, content_json, llm_used, status, generation_note, created_at
             FROM adaptive_tasks
             WHERE id = ?
             """,
@@ -1593,7 +1606,7 @@ def admin_generate_adaptive_for_user(user_id: int):
         flash("Недостаточно данных для генерации черновика.")
         return redirect(url_for("admin_support_detail", user_id=user_id))
 
-    questions, llm_used = generate_adaptive_questions(user_id, target_concepts)
+    questions, llm_used, generation_note = generate_adaptive_questions(user_id, target_concepts)
     if not questions:
         flash("Не удалось сформировать качественный черновик набора.")
         return redirect(url_for("admin_support_detail", user_id=user_id))
@@ -1603,9 +1616,9 @@ def admin_generate_adaptive_for_user(user_id: int):
             """
             INSERT INTO adaptive_tasks (
                 user_id, title, description, source_concepts, content_json,
-                llm_used, status, created_by, created_at
+                llm_used, status, generation_note, created_by, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)
             """,
             (
                 user_id,
@@ -1614,6 +1627,7 @@ def admin_generate_adaptive_for_user(user_id: int):
                 json.dumps(target_concepts, ensure_ascii=False),
                 json.dumps({"questions": questions}, ensure_ascii=False),
                 1 if llm_used else 0,
+                generation_note,
                 user["id"],
                 now_iso(),
             ),
@@ -1668,6 +1682,7 @@ def admin_review_adaptive_task(adaptive_task_id: int):
                 adaptive_task=adaptive_task,
                 questions_json=questions_raw,
                 questions=payload.get("questions", []),
+                generation_note=adaptive_task["generation_note"] or "—",
             )
 
         new_status = "draft" if action == "save" else "assigned"
@@ -1700,6 +1715,7 @@ def admin_review_adaptive_task(adaptive_task_id: int):
         adaptive_task=adaptive_task,
         questions=payload.get("questions", []),
         questions_json=json.dumps(payload.get("questions", []), ensure_ascii=False, indent=2),
+        generation_note=adaptive_task["generation_note"] or "—",
     )
 
 
