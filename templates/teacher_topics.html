@@ -1,0 +1,25 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Управление темами</h2>
+    <div class="actions"><a class="button" href="{{ url_for('teacher_new_course') }}">Добавить курс</a><a class="button" href="{{ url_for('teacher_new_topic') }}">Добавить тему</a></div>
+    <ul class="list">
+      {% for topic in topics %}
+        <li class="list-item">
+          <div>
+            <h3>{{ topic.title }}</h3>
+            <p>{{ topic.description }}</p>
+            <p class="meta">Курс: {{ topic.course_title }}</p>
+          </div>
+          <div class="actions">
+            <a class="button secondary" href="{{ url_for('teacher_new_task', topic_id=topic.id) }}">Добавить задание</a>
+            <form method="post" action="{{ url_for('teacher_delete_topic', topic_id=topic.id) }}">
+              <button type="submit">Удалить тему</button>
+            </form>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endblock %}

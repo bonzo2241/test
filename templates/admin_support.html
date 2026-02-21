@@ -1,0 +1,37 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Агент поддержки: мониторинг студентов</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Студент</th>
+          <th>Статус</th>
+          <th>Выполнено</th>
+          <th>Средний результат</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in reports %}
+          <tr>
+            <td>{{ item.user.username }}</td>
+            <td>{{ item.report.risk_level }}</td>
+            <td>{{ item.report.monitoring.completed_tasks }} / {{ item.report.monitoring.total_tasks }}</td>
+            <td>
+              {% if item.report.monitoring.average_score is not none %}
+                {{ (item.report.monitoring.average_score * 100) | round(0) }}%
+              {% else %}
+                нет данных
+              {% endif %}
+            </td>
+            <td>
+              <a class="button secondary" href="{{ url_for('admin_support_detail', user_id=item.user.id) }}">Подробнее</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

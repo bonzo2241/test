@@ -1,0 +1,47 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Проверка адаптивного набора</h2>
+    <p><strong>Студент:</strong> {{ adaptive_task.username }}</p>
+    <p><strong>Название:</strong> {{ adaptive_task.title }}</p>
+    <p><strong>Статус:</strong> {{ adaptive_task.status }}</p>
+    <p><strong>Источник:</strong> {{ "LLM" if adaptive_task.llm_used else "встроенный адаптер" }}</p>
+    <p><strong>Диагностика генерации:</strong> {{ generation_note or adaptive_task.generation_note or "—" }}</p>
+
+    <h3>Предпросмотр вопросов</h3>
+    {% if questions %}
+      <ol>
+        {% for q in questions %}
+          <li>
+            <p><strong>{{ q.question }}</strong></p>
+            <ul>
+              {% for opt in q.options %}
+                <li>
+                  {{ opt }}{% if q.answer == opt %} <strong>(правильный)</strong>{% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p>Вопросы пока не заданы.</p>
+    {% endif %}
+
+    <h3>Редактирование JSON</h3>
+    <form method="post">
+      <textarea name="questions_json" rows="16" required>{{ questions_json }}</textarea>
+      <div class="actions">
+        <button type="submit" name="action" value="save">Сохранить черновик</button>
+        <button type="submit" name="action" value="assign">Назначить студенту</button>
+      </div>
+    </form>
+
+    <form method="post" action="{{ url_for('admin_delete_adaptive_task', adaptive_task_id=adaptive_task.id) }}">
+      <button class="button secondary" type="submit">Удалить набор</button>
+    </form>
+
+    <a class="button" href="{{ url_for('admin_support_detail', user_id=adaptive_task.user_id) }}">Назад</a>
+  </div>
+{% endblock %}
