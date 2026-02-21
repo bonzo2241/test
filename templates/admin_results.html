@@ -1,0 +1,32 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Пользователи</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Пользователь</th>
+          <th>Попыток</th>
+          <th>Последняя попытка</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in users %}
+          <tr>
+            <td>{{ row.username }}</td>
+            <td>{{ row.attempts }}</td>
+            <td>{{ row.last_attempt or "нет" }}</td>
+            <td>
+              <a class="button secondary" href="{{ url_for('admin_user_profile', user_id=row.id) }}">Открыть профиль</a>
+              <form method="post" action="{{ url_for('admin_delete_user', user_id=row.id) }}">
+                <button type="submit">Удалить пользователя</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

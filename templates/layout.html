@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title or "Учебная поддержка" }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <header>
+      <h1>Многоагентная поддержка обучения</h1>
+      <nav>
+        <a href="{{ url_for('index') }}">Главная</a>
+        {% if user %}
+          <a href="{{ url_for('topics') }}">Темы и задания</a>
+          <a href="{{ url_for('support') }}">Поддержка</a>
+          {% if user.is_admin %}
+            <a href="{{ url_for('admin_users') }}">Профили пользователей</a>
+            <a href="{{ url_for('admin_support') }}">Агент поддержки</a>
+            <a href="{{ url_for('ontology_export') }}">Онтология</a>
+            <a href="{{ url_for('teacher_topics') }}">Преподаватель</a>
+          {% endif %}
+          <a href="{{ url_for('logout') }}">Выйти ({{ user.username }})</a>
+        {% else %}
+          <a href="{{ url_for('login') }}">Войти</a>
+          <a href="{{ url_for('register') }}">Регистрация</a>
+        {% endif %}
+      </nav>
+    </header>
+    <main>
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          <ul class="flash">
+            {% for message in messages %}
+              <li>{{ message }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

@@ -1,0 +1,22 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Новый курс</h2>
+    <form method="post">
+      <label>
+        Название курса
+        <input type="text" name="title" required />
+      </label>
+      <label>
+        Описание курса
+        <input type="text" name="description" required />
+      </label>
+      <label>
+        Быстрый импорт (JSON, опционально)
+        <textarea name="payload_json" rows="14">{{ example_payload }}</textarea>
+      </label>
+      <button type="submit">Создать курс</button>
+    </form>
+  </div>
+{% endblock %}
